@@ -1,654 +1,136 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
 import Link from "next/link";
-import { AppShell } from "@/components/layout/AppShell";
-import { PageHeader } from "@/components/layout/PageHeader";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { LoadingState } from "@/components/ui/LoadingState";
-import { ErrorState } from "@/components/ui/ErrorState";
-import {
-  ClaimItem,
-  ContentMetrics,
-  EvidenceItem,
-  FeedbackItem,
-  InterviewReview,
-  PracticeDrill,
-  QuestionReviewItem,
-  StarAnalysis,
-  TranscriptWord,
-} from "@/types/interview";
+import { useParams } from "next/navigation";
 import {
   Activity,
-  AlertCircle,
-  Award,
+  ArrowRight,
   CheckCircle2,
   ChevronRight,
-  Clock,
-  Dumbbell,
-  FileCheck,
+  Eye,
+  FileText,
   Flame,
   Gauge,
-  Lightbulb,
-  Mic,
+  LockKeyhole,
+  Mic2,
   Play,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
   Target,
-  Volume2,
-  XCircle,
-  Zap,
+  Waves,
 } from "lucide-react";
+import { AppShell } from "@/components/layout/AppShell";
+import { apiClient, getMediaUrl } from "@/lib/api-client";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { LoadingState } from "@/components/ui/LoadingState";
+import type {
+  ContentMetrics,
+  EvidenceEvent,
+  InterviewReportCard,
+  InterviewReview,
+  QuestionReviewItem,
+} from "@/types/interview";
+
+function formatTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  return `${Math.floor(safeSeconds / 60).toString().padStart(2, "0")}:${(safeSeconds % 60).toString().padStart(2, "0")}`;
+}
+
+function scoreColor(score: number): string {
+  if (score >= 80) return "text-emerald-200";
+  if (score >= 60) return "text-amber-200";
+  return "text-rose-200";
+}
+
+function MetricTile({ label, value, note, accent }: { label: string; value: string; note: string; accent: string }) {
+  return <div className={`rounded-2xl border border-white/8 bg-[#131923]/85 p-4 ${accent}`}><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500">{label}</p><p className="mt-4 font-mono text-3xl text-white">{value}</p><p className="mt-1 text-xs text-slate-500">{note}</p></div>;
+}
+
+function ScoreBar({ label, score }: { label: string; score: number }) {
+  return <div><div className="mb-2 flex items-center justify-between text-xs"><span className="text-slate-400">{label}</span><span className={`font-mono ${scoreColor(score)}`}>{Math.round(score)}</span></div><div className="h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-gradient-to-r from-violet-300 to-cyan-300 transition-all" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div></div>;
+}
 
 export default function InterviewReviewPage() {
-  const params = useParams();
-  const interviewId = params.id as string;
-
+  const params = useParams<{ id: string }>();
+  const interviewId = params.id;
   const [review, setReview] = useState<InterviewReview | null>(null);
-  const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number>(0);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [currentTime, setCurrentTime] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [pendingSeek, setPendingSeek] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    async function fetchReview() {
+    let cancelled = false;
+    async function loadReview() {
       try {
-        setIsLoading(true);
-        const res = await fetch(`http://localhost:8000/api/v1/interviews/${interviewId}/review`);
-        if (!res.ok) {
-          throw new Error(`Failed to load review (HTTP ${res.status})`);
-        }
-        const data: InterviewReview = await res.json();
-        setReview(data);
-
-        // Load recorded video if available
-        if (data.questions_review.length > 0) {
-          const firstAnswer = data.questions_review[0]?.answer;
-          if (firstAnswer?.audio_storage_key) {
-            setVideoUrl(`http://localhost:8000/api/v1/storage/media/${firstAnswer.audio_storage_key}`);
-          }
-        }
+        const data = await apiClient.get<InterviewReview>(`/api/v1/interviews/${interviewId}/review`);
+        if (!cancelled) setReview(data);
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Failed to load review data");
+        if (!cancelled) setError(err instanceof Error ? err.message : "The report could not be loaded.");
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-
-    if (interviewId) {
-      fetchReview();
-    }
+    if (interviewId) void loadReview();
+    return () => { cancelled = true; };
   }, [interviewId]);
 
-  // Update video source when switching questions
-  const handleSelectQuestion = (idx: number) => {
-    setSelectedQuestionIndex(idx);
-    const item = review?.questions_review[idx];
-    if (item?.answer?.audio_storage_key) {
-      setVideoUrl(`http://localhost:8000/api/v1/storage/media/${item.answer.audio_storage_key}`);
+  const currentItem: QuestionReviewItem | undefined = review?.questions_review[selectedIndex];
+  const content: ContentMetrics | null | undefined = currentItem?.content_metrics;
+  const report: InterviewReportCard | null = review?.report_card ?? null;
+  const currentVideoUrl = currentItem?.answer?.audio_storage_key ? getMediaUrl(currentItem.answer.audio_storage_key) : null;
+  const events = report?.evidence_events ?? [];
+  const currentQuestionEvents = events.filter((event) => event.question_number === currentItem?.question.sequence_number);
+  const repairQuestion = report?.recommended_repair_question ?? currentItem?.question.sequence_number ?? 1;
+
+  const selectQuestion = (index: number, seekSeconds?: number) => {
+    setSelectedIndex(index);
+    setCurrentTime(0);
+    setPendingSeek(seekSeconds ?? null);
+  };
+
+  const focusEvent = (event: EvidenceEvent) => {
+    const questionIndex = review?.questions_review.findIndex((item) => item.question.sequence_number === event.question_number) ?? -1;
+    if (questionIndex >= 0) selectQuestion(questionIndex, event.start_seconds);
+  };
+
+  const onVideoReady = () => {
+    if (videoRef.current && pendingSeek !== null) {
+      videoRef.current.currentTime = pendingSeek;
+      setCurrentTime(pendingSeek);
+      void videoRef.current.play().catch(() => undefined);
+      setPendingSeek(null);
     }
   };
 
-  // Synchronized seek
-  const handleSeek = (seconds: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = Math.max(0, seconds);
-      videoRef.current.play().catch(() => {});
-      setIsPlaying(true);
-    }
-  };
+  if (loading) return <AppShell><LoadingState size="lg" message="Compiling your evidence-backed report..." /></AppShell>;
+  if (error || !review) return <AppShell><ErrorState title="Could not load this report" message={error ?? "Review data is unavailable."} onRetry={() => window.location.reload()} /></AppShell>;
 
-  if (isLoading) {
-    return (
-      <AppShell>
-        <div className="flex h-96 flex-col items-center justify-center">
-          <LoadingState size="lg" message="Compiling interview intelligence & metrics..." />
-        </div>
-      </AppShell>
-    );
-  }
+  return <AppShell>
+    <div className="space-y-7 pb-16">
+      <div className="flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow">Interview report</p><h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">Your answer, with receipts.</h1><p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">{review.role_profile?.role_title ?? review.interview.title} · {review.total_answers_count} answer{review.total_answers_count === 1 ? "" : "s"} reviewed · {report?.confidence_label ?? "Evidence linked"}</p></div><div className="flex gap-3"><Link href="/interview/new" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"><RotateCcw className="h-4 w-4" />New interview</Link><Link href={`/interview/${interviewId}?repair=${repairQuestion}`} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100"><Sparkles className="h-4 w-4" />Repair weak answer</Link></div></div>
 
-  if (error || !review) {
-    return (
-      <AppShell>
-        <ErrorState
-          title="Could not load interview review"
-          message={error || "Review data is unavailable."}
-          onRetry={() => window.location.reload()}
-        />
-      </AppShell>
-    );
-  }
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><MetricTile label="Overall report" value={report ? `${Math.round(report.overall_score)}` : "—"} note="Content + delivery" accent="border-violet-300/15" /><MetricTile label="Content" value={report ? `${Math.round(report.content_score)}` : "—"} note="Relevance, depth, proof" accent="border-cyan-300/15" /><MetricTile label="Delivery" value={report ? `${Math.round(report.delivery_score)}` : "—"} note="Measured speech signals" accent="border-emerald-300/15" /><MetricTile label="Filler words" value={`${review.total_fillers_count}`} note={`${review.overall_filler_density}% of words`} accent="border-amber-300/15" /></section>
 
-  const currentItem: QuestionReviewItem | undefined = review.questions_review[selectedQuestionIndex];
-  const contentMetrics: ContentMetrics | null | undefined = currentItem?.content_metrics;
+      <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Next rep</p><h2 className="mt-2 text-2xl font-semibold text-white">{report?.next_session_focus ?? "Keep the headline-first structure."}</h2></div><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-300/12 text-violet-100"><Target className="h-5 w-5" /></div></div><p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Aptly ranks coaching opportunities by severity and ties each one to a drill. Fix one behavior, then run the question again.</p><Link href={`/interview/${interviewId}?repair=${repairQuestion}`} className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white">Open Repair Mode <ArrowRight className="h-4 w-4" /></Link></div>
+        <div className="rounded-2xl border border-white/8 bg-[#0d1118] p-5 sm:p-6"><div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4 text-emerald-300" />Measurement notes</div><span className="rounded-full bg-emerald-300/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-200">Transparent</span></div><div className="mt-5 space-y-3 text-xs leading-5 text-slate-400">{(report?.delivery.metric_notes ?? ["Timestamped speech metrics are deterministic."]).map((note) => <div key={note} className="flex gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />{note}</div>)}<div className="flex gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />Raw camera analysis is not used for identity or emotion inference.</div></div></div>
+      </section>
 
-  return (
-    <AppShell>
-      <div className="space-y-8 pb-16">
-        {/* Page Header */}
-        <PageHeader
-          title="Interview Performance & Coaching Review"
-          description={`Comprehensive review for ${review.role_profile?.role_title || review.interview.title} (${review.interview.difficulty_level.toUpperCase()})`}
-          action={
-            <div className="flex items-center space-x-3">
-              <Link href="/interview/new">
-                <Button variant="outline" size="sm" className="space-x-2">
-                  <RotateCcw className="h-4 w-4" />
-                  <span>New Interview</span>
-                </Button>
-              </Link>
-            </div>
-          }
-        />
+      <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
+        <div className="space-y-5"><div className="rounded-2xl border border-amber-300/15 bg-amber-300/6 p-5"><div className="flex items-center gap-2 text-sm font-semibold text-amber-100"><Flame className="h-4 w-4" />Three habits worth fixing</div><div className="mt-5 space-y-3">{(report?.top_habits ?? []).map((habit) => <div key={habit.id} className="rounded-xl border border-white/8 bg-black/15 p-4"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-white">{habit.title}</p><p className="mt-2 text-xs leading-5 text-slate-400">{habit.observation}</p></div><span className="flex shrink-0 gap-1">{[1,2,3,4,5].map((level) => <span key={level} className={`h-1.5 w-1.5 rounded-full ${level <= habit.severity ? "bg-amber-200" : "bg-white/10"}`} />)}</span></div><div className="mt-4 border-t border-white/8 pt-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">Practice drill · {habit.drill_title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{habit.drill_instructions}</p></div></div>)}{!report?.top_habits.length && <p className="text-sm text-slate-400">No high-priority habit was detected in this session.</p>}</div></div><div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5"><div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-violet-200" />What landed</div><div className="mt-4 space-y-3">{(report?.strengths ?? []).map((strength) => <div key={strength} className="flex gap-3 text-sm leading-6 text-slate-400"><CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />{strength}</div>)}</div></div></div>
 
-        {/* Global Summary KPI Bar */}
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          <Card className="border-indigo-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-indigo-400">
-              <Sparkles className="h-4 w-4" />
-              <span>Overall Content</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {review.average_content_score ? `${Math.round(review.average_content_score)}%` : "84%"}
-            </div>
-            <div className="text-[11px] text-slate-400">Semantic & Technical</div>
-          </Card>
+        <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-center justify-between gap-4"><div><p className="eyebrow">Evidence replay</p><h2 className="mt-2 text-xl font-semibold text-white">Click a moment. See why it matters.</h2></div><span className="inline-flex items-center gap-2 text-xs text-slate-500"><Waves className="h-4 w-4 text-cyan-200" />{events.length} linked moments</span></div><div className="mt-5 flex gap-2 overflow-x-auto pb-1">{review.questions_review.map((item, index) => <button key={item.question.id} type="button" onClick={() => selectQuestion(index)} className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${selectedIndex === index ? "border-violet-300/35 bg-violet-300/12 text-white" : "border-white/8 bg-white/[0.03] text-slate-500 hover:text-white"}`}><span className="block text-[10px] uppercase tracking-wider">Question {item.question.sequence_number}</span><span className="mt-1 block max-w-[9rem] truncate text-xs font-medium">{item.question.competency}</span></button>)}</div><div className="mt-5 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+            <div className="overflow-hidden rounded-2xl border border-white/8 bg-black"><div className="relative aspect-video bg-[#080a0f]">{currentVideoUrl ? <video ref={videoRef} src={currentVideoUrl} controls playsInline onLoadedMetadata={onVideoReady} onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)} className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><Mic2 className="h-8 w-8 text-slate-700" /><p className="text-xs text-slate-500">No recording attached to this answer.</p></div>}<span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] text-slate-400">{formatTime(currentTime)}</span></div><div className="border-t border-white/8 p-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Question {currentItem?.question.sequence_number}</p><p className="mt-2 text-sm leading-6 text-slate-200">{currentItem?.question.question_text}</p></div></div>
+            <div className="space-y-4"><div className="rounded-xl border border-white/8 bg-black/15 p-4"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-300">Delivery snapshot</span><span className="text-[10px] text-emerald-200">Deterministic</span></div><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/[0.04] p-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><Gauge className="h-3.5 w-3.5" />Pace</div><p className="mt-2 font-mono text-xl text-white">{currentItem?.speech_metrics?.wpm ?? 0}<span className="ml-1 text-xs text-slate-500">WPM</span></p></div><div className="rounded-xl bg-white/[0.04] p-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><Flame className="h-3.5 w-3.5" />Fillers</div><p className="mt-2 font-mono text-xl text-white">{currentItem?.speech_metrics?.filler_count ?? 0}</p></div></div><div className="mt-4 space-y-3"><ScoreBar label="Content quality" score={content?.overall_content_score ?? 0} /><ScoreBar label="Relevance" score={content?.relevance_score ?? 0} /><ScoreBar label="Technical depth" score={content?.technical_depth_score ?? 0} /></div></div><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/6 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Eye className="h-4 w-4" />Camera attention estimate</div><p className="mt-2 text-sm text-slate-400">{report?.delivery.camera_attention_estimate == null ? "Not available for this session." : `${Math.round(report.delivery.camera_attention_estimate)}% · reliability ${Math.round((report.delivery.camera_attention_reliability ?? 0) * 100)}%`}</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Aptly labels this as an estimate, not laboratory eye tracking.</p></div></div>
+          </div><div className="mt-6 border-t border-white/8 pt-5"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"><Activity className="h-4 w-4 text-cyan-200" />Timeline</div><div className="mt-3 space-y-2">{currentQuestionEvents.length ? currentQuestionEvents.map((event) => <button key={event.id} type="button" onClick={() => focusEvent(event)} className="group flex w-full items-center gap-3 rounded-xl border border-white/7 bg-black/10 p-3 text-left transition hover:border-cyan-200/25 hover:bg-cyan-300/6"><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${event.type === "filler" ? "bg-amber-300/12 text-amber-200" : event.type === "pause" ? "bg-violet-300/12 text-violet-200" : "bg-cyan-300/12 text-cyan-200"}`}><Play className="h-3.5 w-3.5" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-slate-200">{event.title}</span><span className="mt-1 block truncate text-[11px] text-slate-500">{event.description}{event.quote ? ` · “${event.quote}”` : ""}</span></span><span className="font-mono text-[11px] text-cyan-200">{formatTime(event.start_seconds)}</span><ChevronRight className="h-4 w-4 text-slate-600 transition group-hover:translate-x-0.5" /></button>) : <p className="rounded-xl border border-dashed border-white/10 p-4 text-xs leading-5 text-slate-500">No replayable moments were detected for this question. That is a useful result too.</p>}</div></div></div>
+      </section>
 
-          <Card className="border-cyan-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-cyan-400">
-              <Target className="h-4 w-4" />
-              <span>Relevance</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {review.average_relevance_score ? `${Math.round(review.average_relevance_score)}%` : "88%"}
-            </div>
-            <div className="text-[11px] text-slate-400">Question Alignment</div>
-          </Card>
-
-          <Card className="border-purple-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-purple-400">
-              <Gauge className="h-4 w-4" />
-              <span>Technical Depth</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {review.average_technical_depth_score ? `${Math.round(review.average_technical_depth_score)}%` : "82%"}
-            </div>
-            <div className="text-[11px] text-slate-400">Architecture & Details</div>
-          </Card>
-
-          <Card className="border-emerald-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-emerald-400">
-              <Activity className="h-4 w-4" />
-              <span>Pacing</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {review.average_wpm} <span className="text-xs font-normal text-slate-400">WPM</span>
-            </div>
-            <div className="text-[11px] text-slate-400">Optimal: 130–160 WPM</div>
-          </Card>
-
-          <Card className="border-amber-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-amber-400">
-              <Flame className="h-4 w-4" />
-              <span>Filler Density</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {review.overall_filler_density}%
-            </div>
-            <div className="text-[11px] text-slate-400">{review.total_fillers_count} total detected</div>
-          </Card>
-
-          <Card className="border-blue-500/20 bg-slate-900/60 p-4">
-            <div className="flex items-center space-x-2 text-xs font-semibold text-blue-400">
-              <Clock className="h-4 w-4" />
-              <span>Total Duration</span>
-            </div>
-            <div className="mt-2 text-2xl font-bold text-white">
-              {Math.round(review.total_duration_seconds)}s
-            </div>
-            <div className="text-[11px] text-slate-400">{review.total_answers_count} Questions Answered</div>
-          </Card>
-        </div>
-
-        {/* Question Selector Tabs */}
-        <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto">
-          {review.questions_review.map((item, idx) => (
-            <button
-              key={item.question.id}
-              onClick={() => handleSelectQuestion(idx)}
-              className={`flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
-                selectedQuestionIndex === idx
-                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                  : "bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-white"
-              }`}
-            >
-              <span>Q{item.question.sequence_number}</span>
-              <span className="max-w-[120px] truncate text-xs opacity-80">
-                {item.question.category}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Main Review Split Layout */}
-        {currentItem && (
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
-            {/* Left Column: Synchronized Video Player & Speech Analysis */}
-            <div className="space-y-6 lg:col-span-5">
-              {/* Question Header Card */}
-              <Card className="border-slate-800 bg-slate-900/90">
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <Badge variant="outline" className="border-indigo-500/40 text-indigo-400">
-                      {currentItem.question.category.toUpperCase()} • {currentItem.question.difficulty.toUpperCase()}
-                    </Badge>
-                    <span className="text-xs text-slate-400">
-                      Sequence #{currentItem.question.sequence_number}
-                    </span>
-                  </div>
-                  <CardTitle className="mt-2 text-base font-semibold leading-relaxed text-slate-100">
-                    {currentItem.question.question_text}
-                  </CardTitle>
-                </CardHeader>
-              </Card>
-
-              {/* Video Player */}
-              <Card className="overflow-hidden border-slate-800 bg-black">
-                <div className="relative aspect-video w-full bg-slate-950">
-                  {videoUrl ? (
-                    <video
-                      ref={videoRef}
-                      src={videoUrl}
-                      controls
-                      onTimeUpdate={() => {
-                        if (videoRef.current) {
-                          setCurrentTime(videoRef.current.currentTime);
-                        }
-                      }}
-                      onPlay={() => setIsPlaying(true)}
-                      onPause={() => setIsPlaying(false)}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-                      <Mic className="h-10 w-10 text-slate-600 mb-2" />
-                      <p className="text-sm font-medium text-slate-400">Audio Only / Captured Stream</p>
-                      <p className="text-xs text-slate-500 mt-1">Duration: {currentItem.answer?.duration_seconds.toFixed(1)}s</p>
-                    </div>
-                  )}
-                </div>
-              </Card>
-
-              {/* Speech Delivery Metrics */}
-              <Card className="border-slate-800 bg-slate-900/80">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm font-semibold text-slate-200">Delivery & Speech Metrics</CardTitle>
-                    <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-500/30">
-                      Algorithmic Python Analysis
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg bg-slate-950/60 p-3">
-                      <div className="text-xs text-slate-400">Speaking Pace</div>
-                      <div className="text-lg font-bold text-white">
-                        {currentItem.speech_metrics?.wpm || 0} <span className="text-xs font-normal text-slate-400">WPM</span>
-                      </div>
-                    </div>
-                    <div className="rounded-lg bg-slate-950/60 p-3">
-                      <div className="text-xs text-slate-400">Fillers Detected</div>
-                      <div className="text-lg font-bold text-amber-400">
-                        {currentItem.speech_metrics?.filler_count || 0}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Filler Word List */}
-                  {currentItem.speech_metrics?.filler_words && currentItem.speech_metrics.filler_words.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium text-slate-400">Click to jump to filler:</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {currentItem.speech_metrics.filler_words.map((fw, i) => (
-                          <button
-                            key={i}
-                            onClick={() => handleSeek(fw.timestamp_seconds)}
-                            className="inline-flex items-center space-x-1 rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all"
-                          >
-                            <span>"{fw.word}"</span>
-                            <span className="text-[10px] text-amber-400/70">{fw.timestamp_seconds.toFixed(1)}s</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Word-by-Word Aligned Transcript */}
-              <Card className="border-slate-800 bg-slate-900/80">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-semibold text-slate-200">Interactive Transcript</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="max-h-60 overflow-y-auto rounded-lg bg-slate-950/80 p-3.5 leading-relaxed text-sm">
-                    {currentItem.transcript?.words && currentItem.transcript.words.length > 0 ? (
-                      <div className="flex flex-wrap gap-x-1 gap-y-1">
-                        {currentItem.transcript.words.map((w, idx) => {
-                          const isCurrent =
-                            currentTime >= w.start_seconds && currentTime <= w.end_seconds;
-                          return (
-                            <span
-                              key={idx}
-                              onClick={() => handleSeek(w.start_seconds)}
-                              className={`cursor-pointer rounded px-1 transition-all ${
-                                isCurrent
-                                  ? "bg-indigo-600 text-white font-bold scale-105"
-                                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                              }`}
-                              title={`${w.start_seconds.toFixed(2)}s - ${w.end_seconds.toFixed(2)}s`}
-                            >
-                              {w.word}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-slate-400">{currentItem.transcript?.full_text || "No transcript available."}</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Right Column: Phase 2 Content Intelligence & Actionable Coaching */}
-            <div className="space-y-6 lg:col-span-7">
-              {/* Content Intelligence Scorecard */}
-              <Card className="border-indigo-500/20 bg-slate-900/90 shadow-xl">
-                <CardHeader className="pb-3 border-b border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Award className="h-5 w-5 text-indigo-400" />
-                      <CardTitle className="text-base font-semibold text-white">Content Intelligence & Rubric Breakdown</CardTitle>
-                    </div>
-                    <Badge variant="outline" className="border-indigo-500/40 text-indigo-400 bg-indigo-500/10">
-                      Score: {contentMetrics?.overall_content_score ? `${Math.round(contentMetrics.overall_content_score)}/100` : "84/100"}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-4 space-y-4">
-                  {/* Score Bars */}
-                  <div className="space-y-3">
-                    <ScoreBar
-                      label="Relevance & Intent"
-                      score={contentMetrics?.relevance_score ?? 88}
-                      color="bg-cyan-500"
-                    />
-                    <ScoreBar
-                      label="Technical Depth & Mechanisms"
-                      score={contentMetrics?.technical_depth_score ?? 82}
-                      color="bg-indigo-500"
-                    />
-                    <ScoreBar
-                      label="Completeness"
-                      score={contentMetrics?.completeness_score ?? 80}
-                      color="bg-purple-500"
-                    />
-                    <ScoreBar
-                      label="Structure & Clarity"
-                      score={contentMetrics?.structure_score ?? 85}
-                      color="bg-emerald-500"
-                    />
-                    <ScoreBar
-                      label="Evidence Grounding"
-                      score={contentMetrics?.evidence_score ?? 84}
-                      color="bg-amber-500"
-                    />
-                  </div>
-
-                  {contentMetrics?.reasoning_summary && (
-                    <div className="rounded-lg bg-slate-950/60 p-3 text-xs text-slate-300 border border-slate-800">
-                      <span className="font-semibold text-indigo-400">Evaluator Summary: </span>
-                      {contentMetrics.reasoning_summary}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* STAR Behavioral Framework Analysis (if available) */}
-              {contentMetrics?.star_analysis && (
-                <Card className="border-slate-800 bg-slate-900/90">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-semibold text-slate-200">STAR Framework Behavioral Breakdown</CardTitle>
-                      <Badge variant="outline" className="text-xs text-indigo-400 border-indigo-500/30">
-                        Behavioral Rubric
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <StarChip
-                        label="Situation"
-                        component={contentMetrics.star_analysis.situation}
-                        onSeek={handleSeek}
-                      />
-                      <StarChip
-                        label="Task"
-                        component={contentMetrics.star_analysis.task}
-                        onSeek={handleSeek}
-                      />
-                      <StarChip
-                        label="Action"
-                        component={contentMetrics.star_analysis.action}
-                        onSeek={handleSeek}
-                      />
-                      <StarChip
-                        label="Result"
-                        component={contentMetrics.star_analysis.result}
-                        onSeek={handleSeek}
-                      />
-                    </div>
-
-                    {contentMetrics.star_analysis.missing_components.length > 0 && (
-                      <div className="flex items-center space-x-2 rounded-md bg-amber-500/10 p-2.5 text-xs text-amber-300 border border-amber-500/20">
-                        <AlertCircle className="h-4 w-4 shrink-0" />
-                        <span>
-                          Missing STAR components: {contentMetrics.star_analysis.missing_components.join(", ")}. Be sure to quantify your end results!
-                        </span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Factual Claims Audit */}
-              {contentMetrics?.claims && contentMetrics.claims.length > 0 && (
-                <Card className="border-slate-800 bg-slate-900/90">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm font-semibold text-slate-200">Factual & Quantitative Claims Audit</CardTitle>
-                      <Badge variant="outline" className="text-xs text-cyan-400 border-cyan-500/30">
-                        Anti-Hallucination Audit
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2.5">
-                    {contentMetrics.claims.map((c, i) => (
-                      <div key={i} className="flex items-start justify-between rounded-lg bg-slate-950/60 p-3 border border-slate-800/80">
-                        <div className="space-y-1">
-                          <p className="text-xs font-medium text-slate-200">{c.claim}</p>
-                          {c.evidence_quote && (
-                            <p className="text-[11px] text-slate-400 italic">"{c.evidence_quote}"</p>
-                          )}
-                        </div>
-                        <Badge
-                          variant={
-                            c.support_status === "SUPPORTED"
-                              ? "default"
-                              : c.support_status === "PARTIALLY_SUPPORTED"
-                              ? "outline"
-                              : "destructive"
-                          }
-                          className="text-[10px] uppercase shrink-0 ml-3"
-                        >
-                          {c.support_status}
-                        </Badge>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Actionable Feedback (Observation -> Impact -> Action) */}
-              <Card className="border-slate-800 bg-slate-900/90">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center space-x-2">
-                    <Lightbulb className="h-4 w-4 text-amber-400" />
-                    <CardTitle className="text-sm font-semibold text-slate-200">Actionable Coaching Feedback</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(contentMetrics?.feedback || [
-                    {
-                      observation: "Explained core architecture well but did not discuss caching invalidation edge cases.",
-                      impact: "Senior interviewers look for proactive discussion of operational trade-offs and failure modes.",
-                      action: "Pair architectural decisions with one explicit failure recovery scenario (e.g. Redis eviction policy).",
-                    },
-                  ]).map((fb, idx) => (
-                    <div key={idx} className="space-y-2 rounded-lg bg-slate-950/70 p-3.5 border border-slate-800">
-                      <div className="text-xs">
-                        <span className="font-semibold text-slate-400">Observation: </span>
-                        <span className="text-slate-200">{fb.observation}</span>
-                      </div>
-                      <div className="text-xs">
-                        <span className="font-semibold text-amber-400">Impact: </span>
-                        <span className="text-slate-300">{fb.impact}</span>
-                      </div>
-                      <div className="text-xs">
-                        <span className="font-semibold text-emerald-400">Action: </span>
-                        <span className="text-emerald-200 font-medium">{fb.action}</span>
-                      </div>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-
-              {/* Practice Drills */}
-              <Card className="border-indigo-500/30 bg-gradient-to-br from-slate-900 to-indigo-950/40">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <Dumbbell className="h-4 w-4 text-indigo-400" />
-                      <CardTitle className="text-sm font-semibold text-white">Targeted Practice Drills</CardTitle>
-                    </div>
-                    <Badge variant="outline" className="text-xs text-indigo-300 border-indigo-500/40">
-                      Repeat to Master
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(contentMetrics?.practice_drills || [
-                    {
-                      title: "60-Second Trade-off Elaboration Drill",
-                      duration_seconds: 60,
-                      instructions: "State the stack choice (15s), highlight the main benefit (20s), and articulate two trade-offs/failure modes (25s).",
-                      repeat_count: 3,
-                    },
-                  ]).map((drill, idx) => (
-                    <div key={idx} className="rounded-lg bg-slate-950/80 p-3.5 border border-indigo-500/20 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-indigo-300">{drill.title}</span>
-                        <Badge variant="outline" className="text-[10px] text-slate-300 border-slate-700">
-                          {drill.duration_seconds}s • {drill.repeat_count}x Reps
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-slate-300 leading-relaxed">{drill.instructions}</p>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        )}
-      </div>
-    </AppShell>
-  );
-}
-
-function ScoreBar({ label, score, color }: { label: string; score: number; color: string }) {
-  return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs">
-        <span className="font-medium text-slate-300">{label}</span>
-        <span className="font-bold text-white">{Math.round(score)}%</span>
-      </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
-        />
-      </div>
+      <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]"><div className="rounded-2xl border border-white/8 bg-[#0d1118] p-5 sm:p-6"><div className="flex items-center gap-2 text-sm font-semibold text-white"><FileText className="h-4 w-4 text-violet-200" />Transcript</div><div className="mt-4 max-h-48 overflow-y-auto rounded-xl border border-white/7 bg-black/15 p-4 text-sm leading-7 text-slate-300">{currentItem?.transcript?.words?.length ? currentItem.transcript.words.map((word, index) => <button key={`${word.word}-${index}`} type="button" onClick={() => { setPendingSeek(word.start_seconds); if (videoRef.current) { videoRef.current.currentTime = word.start_seconds; setCurrentTime(word.start_seconds); } }} className={`mr-1 rounded px-1 transition ${currentTime >= word.start_seconds && currentTime <= word.end_seconds ? "bg-violet-300/25 text-white" : "hover:bg-white/8"}`}>{word.word}</button>) : currentItem?.transcript?.full_text ?? "No timestamped transcript available."}</div></div><div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-violet-200" />Content readout</div>{content ? <div className="mt-4 space-y-4"><p className="text-sm leading-6 text-slate-400">{content.reasoning_summary}</p><div className="grid gap-3 sm:grid-cols-2">{content.feedback.slice(0, 2).map((feedback) => <div key={feedback.observation} className="rounded-xl border border-white/7 bg-black/10 p-3"><p className="text-xs font-semibold text-slate-200">{feedback.observation}</p><p className="mt-2 text-xs leading-5 text-slate-500">{feedback.action}</p></div>)}</div></div> : <div className="mt-4 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-500">Content evaluation is still processing for this answer.</div>}</div></section>
     </div>
-  );
-}
-
-function StarChip({
-  label,
-  component,
-  onSeek,
-}: {
-  label: string;
-  component?: {
-    present: boolean;
-    quality: number;
-    evidence_text?: string | null;
-    start_seconds?: number | null;
-  };
-  onSeek: (s: number) => void;
-}) {
-  const isPresent = component?.present ?? false;
-
-  return (
-    <div
-      onClick={() => {
-        if (component?.start_seconds) {
-          onSeek(component.start_seconds);
-        }
-      }}
-      className={`cursor-pointer rounded-lg p-2.5 border transition-all ${
-        isPresent
-          ? "bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20"
-          : "bg-red-500/10 border-red-500/30"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200">{label}</span>
-        {isPresent ? (
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-        ) : (
-          <XCircle className="h-3.5 w-3.5 text-red-400" />
-        )}
-      </div>
-      <div className="mt-1 flex items-center justify-between text-[10px]">
-        <span className={isPresent ? "text-emerald-300" : "text-red-400"}>
-          {isPresent ? `${Math.round(component?.quality || 80)}%` : "Missing"}
-        </span>
-        {component?.start_seconds && (
-          <span className="text-slate-400 hover:text-white">
-            {component.start_seconds.toFixed(1)}s
-          </span>
-        )}
-      </div>
-    </div>
-  );
+  </AppShell>;
 }

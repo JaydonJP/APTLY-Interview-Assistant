@@ -1,37 +1,30 @@
-# APTLY — Evidence-Grounded Multimodal AI Interview Coach
+# APTLY — Evidence-backed interview coaching
 
-> **Phase 0: Foundation Scaffold** — No AI interview logic yet. This is the production-grade architectural foundation.
+APTLY is a multimodal interview assistant for practicing role-specific answers, measuring delivery, and turning every weakness into a focused next rep. The product loop is:
 
-## Core Philosophy
+**Prepare → answer → measure → replay → repair → repeat.**
 
-**"Interview → Measure → Diagnose → Practice → Repeat → Verify"**
+The current build includes role-aware interview setup, adaptive follow-up questions, browser camera/microphone capture, deterministic speech metrics, semantic answer analysis, local/Supabase media storage, an evidence-linked report card, and Repair Mode.
 
-**Measurement Before Interpretation:** Deterministic processors (audio/vision) produce structured features. LLMs interpret those features — they never measure.
-
----
-
-## Quick Start
+## Run locally
 
 ### Prerequisites
 
 - Python 3.11+
 - Node.js 20+
-- Docker Desktop (for PostgreSQL + Redis)
+- Docker Desktop (optional; only needed for PostgreSQL/Redis-backed development)
 
 ### Backend
 
 ```bash
 cd apps/api
 python -m venv .venv
-.venv\Scripts\pip install -e ".[dev]"   # Windows
-# OR
-.venv/bin/pip install -e ".[dev]"       # macOS/Linux
+.venv\\Scripts\\python -m pip install -e ".[dev]"   # Windows
+# .venv/bin/python -m pip install -e ".[dev]"        # macOS/Linux
 
-# Start services
-docker-compose up -d
-
-# Run server
-.venv\Scripts\uvicorn app.main:app --reload --port 8000
+# The default configuration uses SQLite-compatible test settings, local storage,
+# and mock AI providers, so no API keys are required for a demo.
+.venv\\Scripts\\uvicorn app.main:app --reload --port 8000
 ```
 
 ### Frontend
@@ -39,119 +32,70 @@ docker-compose up -d
 ```bash
 cd apps/web
 npm install
-npm run dev   # http://localhost:3000
+npm run dev
 ```
 
-### Tests
+Open [http://localhost:3000](http://localhost:3000), choose **Start a new interview**, paste a job description, and follow the capture flow. The browser will request camera/microphone permission before the live room.
+
+For a real Gemini/WhisperX run, configure the provider variables in `apps/api/.env` and install the corresponding runtime model dependencies. The mock providers remain the reliable offline/demo path.
+
+## Product flow
+
+1. **Role intelligence** extracts role, seniority, skills, responsibilities, and competencies from a job description.
+2. **Adaptive interview** creates a question graph and can add a grounded follow-up when an answer has an unsupported claim or an important gap.
+3. **Capture integrity** checks browser tracks, records WebM, computes a client checksum, and uploads through a typed API client.
+4. **Evidence pipeline** normalizes media to 16 kHz mono WAV, transcribes words with timestamps, calculates WPM/fillers/pauses, and evaluates content.
+5. **Evidence Replay** links report events to the answer, transcript, and recording timeline.
+6. **Repair Mode** sends the candidate back to the weakest question with a concrete drill and transparent measurement notes.
+
+## API surface
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness check |
+| `GET /api/v1/health` | Provider and dependency status |
+| `POST /api/v1/jobs/analyze` | Parse a job description into a role profile |
+| `POST /api/v1/interviews` | Create a role-aware interview |
+| `POST /api/v1/interviews/{id}/start` | Start the session |
+| `POST /api/v1/interviews/{id}/answers` | Create an answer record |
+| `POST /api/v1/interviews/{id}/answers/{answer_id}/upload` | Upload and process a recording |
+| `POST /api/v1/interviews/{id}/next-question` | Advance the question graph |
+| `POST /api/v1/interviews/{id}/finish` | Complete the session |
+| `GET /api/v1/interviews/{id}/review` | Load the evidence-backed report |
+| `GET /api/v1/storage/media/{storage_key}` | Private API playback for local media |
+
+## Privacy and measurement boundaries
+
+- Raw recordings stay in the configured storage provider; local development writes to the ignored `storage/` directory.
+- Storage keys are opaque UUID-based paths rather than client filenames.
+- The report separates deterministic speech measurements from semantic interpretation.
+- Camera attention is explicitly labeled as unavailable until a reliable browser telemetry pipeline is attached; APTLY does not infer identity, emotion, or personality.
+- Report feedback always includes an observation, its impact, and a practice action.
+
+## Verification
 
 ```bash
-# Backend — 39 tests, no external services required
+# Backend
 cd apps/api
-.venv\Scripts\pytest --tb=short -v
+.venv\\Scripts\\python -m pytest --tb=short -v
+.venv\\Scripts\\ruff check app tests
 
 # Frontend
 cd apps/web
 npm run lint
+npm test
+npm run build
 ```
 
----
+The PostgreSQL and Redis integration tests are skipped automatically when those services are not running.
 
-## Repository Structure
+## Repository map
 
+```text
+apps/api/          FastAPI service, providers, storage, database models, tests
+apps/web/          Next.js App Router application and capture experience
+packages/          Shared contracts
+docs/              Architecture, API, data model, and privacy notes
+infrastructure/    Docker and database support
+services/          Provider and processing design notes
 ```
-Parallax/
-├── apps/
-│   ├── api/                    # FastAPI backend
-│   │   ├── app/
-│   │   │   ├── api/v1/        # Route handlers
-│   │   │   ├── core/          # Logging, errors, middleware, security
-│   │   │   ├── domain/        # Domain events, WebSocket events
-│   │   │   ├── models/        # SQLAlchemy ORM models
-│   │   │   ├── repositories/  # Database access layer
-│   │   │   ├── schemas/       # Pydantic request/response schemas
-│   │   │   ├── services/      # Business logic + AI providers
-│   │   │   │   ├── providers/ # LLM, TTS, Transcription interfaces + mocks
-│   │   │   │   └── storage/   # Storage interface + local implementation
-│   │   │   ├── config.py      # Typed settings
-│   │   │   ├── dependencies.py # FastAPI DI
-│   │   │   └── main.py        # App factory
-│   │   ├── alembic/           # Database migrations
-│   │   └── tests/             # 39 passing tests
-│   └── web/                   # Next.js 15 frontend
-│       └── src/
-│           ├── app/           # App Router pages
-│           ├── components/    # UI components
-│           ├── hooks/         # React Query hooks
-│           ├── lib/           # API client, utilities
-│           └── types/         # TypeScript types
-├── packages/
-│   └── shared-types/          # Shared TypeScript contracts
-├── services/                  # Service documentation (Phase 1+)
-│   ├── ai/                    # LLM prompts (versioned)
-│   ├── audio/                 # Audio feature extraction
-│   ├── coaching/              # Evidence-grounded coaching
-│   ├── evaluation/            # Answer evaluation
-│   ├── transcription/         # Speech-to-text
-│   └── vision/                # Browser-side MediaPipe
-├── workers/                   # Async job workers
-├── infrastructure/            # Docker, PostgreSQL init
-├── docs/                      # Architecture, API, privacy docs
-│   ├── architecture/          # System design docs
-│   ├── api/                   # API contracts
-│   ├── data-model/            # Entity definitions
-│   └── privacy/               # Data lifecycle + privacy
-└── .github/workflows/ci.yml   # GitHub Actions CI
-```
-
----
-
-## API
-
-| Endpoint | Status | Description |
-|---|---|---|
-| `GET /health` | ✅ Phase 0 | Liveness probe |
-| `GET /api/v1/health` | ✅ Phase 0 | Detailed health + service status |
-| `POST /api/v1/interviews` | 🚧 Phase 1 | Create interview |
-| `POST /api/v1/interviews/{id}/start` | 🚧 Phase 1 | Begin session |
-| `POST /api/v1/interviews/{id}/answers` | 🚧 Phase 1 | Submit answer |
-| `GET /api/v1/interviews/{id}/report` | 🚧 Phase 1 | Get evaluation report |
-| `GET /api/v1/progress` | 🚧 Phase 3 | Progress tracking |
-| `WS /api/v1/interviews/{id}/realtime` | 🚧 Phase 1 | Realtime interview |
-
----
-
-## Provider Configuration
-
-All AI/ML providers are injectable. Default to mock in development.
-
-| Provider | Env Var | Default | Real Provider |
-|---|---|---|---|
-| LLM | `LLM_PROVIDER` | `mock` | `openai`, `anthropic` |
-| TTS | `TTS_PROVIDER` | `mock` | `elevenlabs`, `openai` |
-| Transcription | `TRANSCRIPTION_PROVIDER` | `mock` | `whisper`, `deepgram` |
-| Storage | `STORAGE_PROVIDER` | `local` | `s3`, `r2` |
-
----
-
-## Documentation
-
-- [Architecture Overview](docs/architecture/overview.md)
-- [Async Processing Pipeline](docs/architecture/async-processing.md)
-- [AI Pipeline](docs/architecture/ai-pipeline.md)
-- [Realtime Architecture](docs/architecture/realtime.md)
-- [API Contracts](docs/api/contracts.md)
-- [Data Model](docs/data-model/entities.md)
-- [Privacy & Data Lifecycle](docs/privacy/data-lifecycle.md)
-
----
-
-## Phase Roadmap
-
-| Phase | Focus |
-|---|---|
-| **0** (current) | Foundation scaffold |
-| **1** | Core interview loop (WebSocket, TTS, Whisper) |
-| **2** | Full analysis (MediaPipe, audio metrics, STAR detection) |
-| **3** | Coaching (evidence-grounded feedback, practice drills) |
-| **4** | Progress tracking, adaptive difficulty |
-| **5** | Replay, export, privacy workflows |

@@ -22,7 +22,7 @@ export function Card({ children, id, className, padding = "md" }: CardProps) {
     <div
       id={id}
       className={cn(
-        "rounded-xl border border-slate-800 bg-slate-900/90 shadow-sm transition-all",
+        "rounded-2xl border border-white/8 bg-[#131923]/85 shadow-[0_1rem_3rem_rgba(0,0,0,0.16)] transition-all",
         paddingClasses[padding],
         className
       )}

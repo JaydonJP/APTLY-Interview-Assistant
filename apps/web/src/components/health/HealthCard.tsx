@@ -58,10 +58,10 @@ export function HealthCard() {
           className={cn(
             "text-sm font-medium",
             data?.status === "ok"
-              ? "text-emerald-700"
+              ? "text-emerald-300"
               : data?.status === "degraded"
-                ? "text-yellow-700"
-                : "text-red-700",
+                ? "text-amber-300"
+                : "text-red-300",
           )}
         >
           {data?.status === "ok"
@@ -75,7 +75,7 @@ export function HealthCard() {
       {/* Mock provider warning */}
       {data?.using_mock_providers && (
         <div
-          className="mb-4 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 border border-amber-200"
+          className="mb-4 rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-200"
           role="alert"
           id="mock-provider-warning"
         >
@@ -93,7 +93,7 @@ export function HealthCard() {
             >
               <div className="flex items-center gap-2">
                 <StatusIcon status={service.status} />
-                <span className="text-slate-700">{service.name}</span>
+                <span className="text-slate-300">{service.name}</span>
               </div>
               <div className="flex items-center gap-2">
                 {service.latency_ms != null && (

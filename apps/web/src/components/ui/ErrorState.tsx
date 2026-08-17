@@ -26,12 +26,12 @@ export function ErrorState({
       )}
       role="alert"
     >
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50">
-        <AlertCircle className="h-6 w-6 text-red-500" aria-hidden="true" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-full border border-red-300/20 bg-red-400/10">
+        <AlertCircle className="h-6 w-6 text-red-300" aria-hidden="true" />
       </div>
       <div className="space-y-1">
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        <p className="text-sm text-slate-500 max-w-sm">{message}</p>
+        <h3 className="font-semibold text-white">{title}</h3>
+        <p className="max-w-sm text-sm text-slate-400">{message}</p>
       </div>
       {onRetry && (
         <button

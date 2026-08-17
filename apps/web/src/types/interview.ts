@@ -261,4 +261,54 @@ export interface InterviewReview {
   average_relevance_score?: number;
   average_technical_depth_score?: number;
   questions_review: QuestionReviewItem[];
+  report_card?: InterviewReportCard | null;
+}
+
+export interface ReportHabit {
+  id: string;
+  title: string;
+  severity: number;
+  observation: string;
+  impact: string;
+  drill_title: string;
+  drill_instructions: string;
+  evidence_start_seconds?: number | null;
+  evidence_end_seconds?: number | null;
+}
+
+export interface EvidenceEvent {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  start_seconds: number;
+  end_seconds: number;
+  severity: number;
+  reliability?: number | null;
+  question_number?: number | null;
+  quote?: string | null;
+}
+
+export interface DeliveryOverview {
+  score: number;
+  pace_label: string;
+  pace_note: string;
+  camera_attention_estimate?: number | null;
+  camera_attention_reliability?: number | null;
+  voice_energy_trend?: number | null;
+  voice_energy_label: string;
+  metric_notes: string[];
+}
+
+export interface InterviewReportCard {
+  overall_score: number;
+  content_score: number;
+  delivery_score: number;
+  confidence_label: string;
+  strengths: string[];
+  top_habits: ReportHabit[];
+  evidence_events: EvidenceEvent[];
+  delivery: DeliveryOverview;
+  recommended_repair_question?: number | null;
+  next_session_focus: string;
 }

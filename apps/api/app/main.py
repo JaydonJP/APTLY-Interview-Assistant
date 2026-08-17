@@ -113,8 +113,9 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         description=(
             "Evidence-Grounded Multimodal AI Interview Coach — REST API\n\n"
-            "Phase 0: Foundation scaffold. See /docs for OpenAPI specification.\n"
-            "See docs/api/contracts.md for planned endpoint contracts."
+            "Role-aware interviews, deterministic speech metrics, adaptive follow-ups, "
+            "and evidence-linked coaching reports.\n"
+            "See docs/api/contracts.md for API contracts."
         ),
         version=settings.app_version,
         docs_url="/docs" if not settings.is_production else None,

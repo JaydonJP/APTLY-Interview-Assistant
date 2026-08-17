@@ -32,12 +32,12 @@ export function LoadingState({
     >
       <div
         className={cn(
-          "rounded-full border-slate-200 border-t-slate-700 animate-spin",
+          "rounded-full border-white/10 border-t-violet-300 animate-spin",
           sizeClasses[size],
         )}
       />
       {message && (
-        <p className="text-sm text-slate-500 font-medium">{message}</p>
+        <p className="text-sm font-medium text-slate-400">{message}</p>
       )}
     </div>
   );

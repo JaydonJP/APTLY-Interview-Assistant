@@ -13,11 +13,11 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="app-shell">
       <Navbar />
       <main
         id="main-content"
-        className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8"
+        className="app-main"
       >
         {children}
       </main>

@@ -232,7 +232,7 @@ export default function NewInterviewPage() {
                 </h2>
               </div>
               <span className="text-xs font-mono text-slate-400">
-                Phase 1 Role Analyzer
+                Role intelligence
               </span>
             </div>
 

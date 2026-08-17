@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { VideoPreview } from "@/components/camera/VideoPreview";
 import { AudioVisualizer } from "@/components/audio/AudioVisualizer";
@@ -35,6 +35,8 @@ export default function LiveInterviewRoomPage() {
   const params = useParams<{ id: string }>();
   const interviewId = params.id;
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const repairQuestion = Number(searchParams.get("repair") ?? "0");
 
   const [interview, setInterview] = useState<InterviewDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,7 +51,6 @@ export default function LiveInterviewRoomPage() {
   // Question / Auto-Record Lifecycle State
   const [isTtsPlaying, setIsTtsPlaying] = useState(false);
   const [autoRecordCountdown, setAutoRecordCountdown] = useState<number | null>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Unified Media Capture Hook
   const {
@@ -91,6 +92,9 @@ export default function LiveInterviewRoomPage() {
         );
       }
 
+      if (repairQuestion > 0 && repairQuestion <= data.questions.length) {
+        data = { ...data, current_question_index: repairQuestion - 1 };
+      }
       setInterview(data);
 
       // Check if current question already has an answer
@@ -106,7 +110,7 @@ export default function LiveInterviewRoomPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [interviewId]);
+  }, [interviewId, repairQuestion]);
 
   useEffect(() => {
     if (interviewId) {
@@ -178,7 +182,15 @@ export default function LiveInterviewRoomPage() {
 
       window.speechSynthesis.speak(utterance);
     }
-  }, [currentQuestion?.id, hasConsent, currentAnswer]);
+  }, [
+    currentAnswer,
+    currentQuestion,
+    hasConsent,
+    isRecording,
+    isSubmitting,
+    recordedBlob,
+    startRecording,
+  ]);
 
   // Enforce Maximum Answer Duration (180s)
   useEffect(() => {
@@ -220,20 +232,10 @@ export default function LiveInterviewRoomPage() {
       );
       formData.append("duration_seconds", String(recordingDuration || 5.0));
 
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const uploadRes = await fetch(
-        `${apiUrl}/api/v1/interviews/${interviewId}/answers/${answerId}/upload`,
-        {
-          method: "POST",
-          body: formData,
-        },
+      const processedAns = await apiClient.upload<Answer>(
+        `/api/v1/interviews/${interviewId}/answers/${answerId}/upload`,
+        formData,
       );
-
-      if (!uploadRes.ok) {
-        throw new Error("Failed to upload recording to storage.");
-      }
-
-      const processedAns = (await uploadRes.json()) as Answer;
       setCurrentAnswer(processedAns);
 
       // Refresh interview data (picks up any Gemini adaptive follow-up inserted)
@@ -409,6 +411,13 @@ export default function LiveInterviewRoomPage() {
           </div>
         </div>
       </div>
+
+      {repairQuestion > 0 && (
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-violet-300/20 bg-violet-300/8 p-4 text-sm text-violet-100">
+          <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
+          <div><p className="font-semibold">Repair Mode · question {repairQuestion}</p><p className="mt-1 text-xs leading-5 text-violet-100/70">Use the same prompt again. Lead with the headline, add the missing proof, and compare this rep with the evidence on your report.</p></div>
+        </div>
+      )}
 
       {(errorMessage || mediaError) && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-950/40 p-4 text-sm text-red-200 backdrop-blur-md">

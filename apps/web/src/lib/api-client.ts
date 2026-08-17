@@ -14,6 +14,17 @@ const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? "" : "http://127.0.0.1:8000");
 
+export function getApiBaseUrl(): string {
+  return API_BASE_URL;
+}
+
+export function getMediaUrl(storageKey: string): string {
+  return `${API_BASE_URL}/api/v1/storage/media/${storageKey
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly code: string,
@@ -100,4 +111,23 @@ export const apiClient = {
 
   delete: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { method: "DELETE", ...options }),
+
+  upload: async <T>(path: string, formData: FormData): Promise<T> => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await parseErrorResponse(response);
+      throw new ApiError(
+        error.code,
+        error.message,
+        error.request_id,
+        response.status,
+      );
+    }
+
+    return response.json() as Promise<T>;
+  },
 };

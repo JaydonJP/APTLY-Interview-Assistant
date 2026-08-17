@@ -36,6 +36,11 @@ class QuestionResponse(AptlyBaseModel):
     question_text: str
     expected_topics: list[str] = Field(default_factory=list)
     prompt_version: str = "v1"
+    parent_question_id: UUID | None = None
+    root_question_id: UUID | None = None
+    question_source: str = "initial"
+    follow_up_depth: int = 0
+    target_competency: str = ""
 
 
 # ── Transcript & Speech Metrics Schemas ───────────────────────────────────────
@@ -203,6 +208,63 @@ class QuestionReviewItem(AptlyBaseModel):
     content_metrics: ContentMetricsResponse | None = None
 
 
+class ReportHabit(AptlyBaseModel):
+    """One prioritized coaching habit with an evidence-backed drill."""
+
+    id: str
+    title: str
+    severity: int = Field(ge=1, le=5)
+    observation: str
+    impact: str
+    drill_title: str
+    drill_instructions: str
+    evidence_start_seconds: float | None = None
+    evidence_end_seconds: float | None = None
+
+
+class EvidenceEvent(AptlyBaseModel):
+    """Replayable event in the report timeline."""
+
+    id: str
+    type: str
+    title: str
+    description: str
+    start_seconds: float = Field(ge=0.0)
+    end_seconds: float = Field(ge=0.0)
+    severity: int = Field(default=1, ge=1, le=5)
+    reliability: float | None = Field(default=None, ge=0.0, le=1.0)
+    question_number: int | None = None
+    quote: str | None = None
+
+
+class DeliveryOverview(AptlyBaseModel):
+    """Deterministic delivery summary, with honest reliability wording."""
+
+    score: float = Field(ge=0.0, le=100.0)
+    pace_label: str
+    pace_note: str
+    camera_attention_estimate: float | None = Field(default=None, ge=0.0, le=100.0)
+    camera_attention_reliability: float | None = Field(default=None, ge=0.0, le=1.0)
+    voice_energy_trend: float | None = None
+    voice_energy_label: str = "Unavailable"
+    metric_notes: list[str] = Field(default_factory=list)
+
+
+class InterviewReportCard(AptlyBaseModel):
+    """Overall report card assembled from measured and semantic signals."""
+
+    overall_score: float = Field(ge=0.0, le=100.0)
+    content_score: float = Field(ge=0.0, le=100.0)
+    delivery_score: float = Field(ge=0.0, le=100.0)
+    confidence_label: str
+    strengths: list[str] = Field(default_factory=list)
+    top_habits: list[ReportHabit] = Field(default_factory=list)
+    evidence_events: list[EvidenceEvent] = Field(default_factory=list)
+    delivery: DeliveryOverview
+    recommended_repair_question: int | None = None
+    next_session_focus: str
+
+
 class InterviewReviewResponse(VersionedSchema):
     """Comprehensive post-interview review view."""
 
@@ -218,3 +280,4 @@ class InterviewReviewResponse(VersionedSchema):
     average_relevance_score: float = 0.0
     average_technical_depth_score: float = 0.0
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)
+    report_card: InterviewReportCard | None = None

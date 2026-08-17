@@ -122,3 +122,6 @@ async def test_full_interview_endpoints_flow(client: AsyncClient) -> None:
     assert len(review_data["questions_review"]) == 2
     assert review_data["total_answers_count"] == 1
     assert review_data["average_wpm"] > 0
+    assert review_data["report_card"]["overall_score"] >= 0
+    assert review_data["report_card"]["delivery"]["pace_label"]
+    assert review_data["report_card"]["evidence_events"]

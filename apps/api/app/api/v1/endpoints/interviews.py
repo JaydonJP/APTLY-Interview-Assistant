@@ -232,6 +232,11 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
             question_text=q.question_text,
             expected_topics=q.expected_topics,
             prompt_version=q.prompt_version,
+            parent_question_id=q.parent_question_id,
+            root_question_id=q.root_question_id,
+            question_source=q.question_source,
+            follow_up_depth=q.follow_up_depth,
+            target_competency=q.target_competency,
         )
         for q in interview.questions
     ]
@@ -251,6 +256,25 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
         created_at=interview.created_at,
         questions=questions_res,
         answers=answers_res,
+        role_profile=(
+            {
+                "id": interview.role_profile.id,
+                "job_id": interview.role_profile.job_id,
+                "role_title": interview.role_profile.role_title,
+                "seniority": interview.role_profile.seniority,
+                "domain": interview.role_profile.domain,
+                "technical_skills": interview.role_profile.technical_skills,
+                "tools": interview.role_profile.tools,
+                "responsibilities": interview.role_profile.responsibilities,
+                "behavioral_competencies": interview.role_profile.behavioral_competencies,
+                "interview_topics": interview.role_profile.interview_topics,
+                "preferred_experience": interview.role_profile.preferred_experience,
+                "prompt_version": interview.role_profile.prompt_version,
+                "created_at": interview.role_profile.created_at,
+            }
+            if getattr(interview, "role_profile", None)
+            else None
+        ),
     )
 
 

@@ -17,13 +17,13 @@ export function PageHeader({
   action,
 }: PageHeaderProps) {
   return (
-    <div className="flex items-start justify-between mb-6">
+    <div className="mb-8 flex items-start justify-between gap-5">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+        <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">
           {title}
         </h1>
         {description && (
-          <p className="mt-1 text-sm text-slate-500">{description}</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">{description}</p>
         )}
       </div>
       {action && <div className="flex-shrink-0 ml-4">{action}</div>}

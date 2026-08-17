@@ -107,7 +107,7 @@ export function VideoPreview({
             {recordedUrl ? "RECORDED PLAYBACK" : "LIVE CAMERA FEED"}
           </span>
           <span className="bg-slate-950/80 px-2 py-0.5 rounded border border-slate-800 backdrop-blur-sm">
-            Phase 1 Multimodal Capture
+            Capture preview
           </span>
         </div>
       </div>

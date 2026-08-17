@@ -544,6 +544,258 @@ class InterviewService:
 
         return interview
 
+    @staticmethod
+    def _build_report_card(
+        questions_review: list[dict[str, Any]],
+        average_content_score: float,
+        average_wpm: float,
+        total_duration_seconds: float,
+        total_fillers: int,
+        total_pauses: int,
+    ) -> dict[str, Any]:
+        """Assemble the evidence-first report card from persisted signals.
+
+        Speech metrics are deterministic. Semantic scores come from the
+        structured content evaluator. The report intentionally leaves vision
+        and voice-energy fields unavailable until those signals are actually
+        captured, rather than inventing precision.
+        """
+        evidence_events: list[dict[str, Any]] = []
+        habits: list[dict[str, Any]] = []
+        strengths: list[str] = []
+
+        for item in questions_review:
+            question = item["question"]
+            question_number = question["sequence_number"]
+            speech = item.get("speech_metrics") or {}
+            content = item.get("content_metrics") or {}
+
+            for index, filler in enumerate(speech.get("filler_words", [])):
+                start = float(filler.get("timestamp_seconds", 0.0))
+                end = start + float(filler.get("duration_seconds", 0.2))
+                evidence_events.append(
+                    {
+                        "id": f"filler-{question_number}-{index}",
+                        "type": "filler",
+                        "title": f'Filler word: {filler.get("word", "filler")}',
+                        "description": "A filler word appeared in the answer.",
+                        "start_seconds": start,
+                        "end_seconds": end,
+                        "severity": 3,
+                        "reliability": 0.99,
+                        "question_number": question_number,
+                        "quote": filler.get("word"),
+                    }
+                )
+
+            for index, pause in enumerate(speech.get("pauses", [])):
+                start = float(pause.get("start_seconds", 0.0))
+                end = float(pause.get("end_seconds", start))
+                evidence_events.append(
+                    {
+                        "id": f"pause-{question_number}-{index}",
+                        "type": "pause",
+                        "title": f'Long pause: {end - start:.1f}s',
+                        "description": "A sustained gap between words was detected.",
+                        "start_seconds": start,
+                        "end_seconds": end,
+                        "severity": 2,
+                        "reliability": 0.98,
+                        "question_number": question_number,
+                    }
+                )
+
+            for index, evidence in enumerate(content.get("evidence", [])):
+                start = float(evidence.get("start_seconds", 0.0))
+                end = float(evidence.get("end_seconds", start))
+                evidence_events.append(
+                    {
+                        "id": f'evidence-{question_number}-{evidence.get("id", index)}',
+                        "type": str(evidence.get("type", "evidence")).lower(),
+                        "title": "Evidence anchor",
+                        "description": "Semantic feedback linked to an exact transcript span.",
+                        "start_seconds": start,
+                        "end_seconds": max(start, end),
+                        "severity": 1,
+                        "reliability": float(evidence.get("confidence", 0.8)),
+                        "question_number": question_number,
+                        "quote": evidence.get("text"),
+                    }
+                )
+
+            strengths.extend(strength for strength in content.get("strengths", [])[:2])
+
+            for claim in content.get("claims", []):
+                if claim.get("support_status") not in {"UNSUPPORTED", "PARTIALLY_SUPPORTED"}:
+                    continue
+                habits.append(
+                    {
+                        "id": f"claim-{question_number}",
+                        "title": "Substantiate measurable claims",
+                        "severity": 5 if claim.get("support_status") == "UNSUPPORTED" else 4,
+                        "observation": str(claim.get("claim", "A measurable claim was made without enough detail.")),
+                        "impact": "Specific baselines and validation make your contribution credible to a skeptical interviewer.",
+                        "drill_title": "Metric → Baseline → Result",
+                        "drill_instructions": "Repeat the claim in one sentence, then add the baseline, your action, the result, and how you measured it.",
+                        "evidence_start_seconds": claim.get("start_seconds"),
+                        "evidence_end_seconds": claim.get("start_seconds"),
+                    }
+                )
+
+            star = content.get("star_analysis") or {}
+            missing_components = star.get("missing_components", [])
+            if missing_components:
+                habits.append(
+                    {
+                        "id": f"star-{question_number}",
+                        "title": "Close the STAR loop",
+                        "severity": 4,
+                        "observation": f"The answer did not clearly land the {', '.join(missing_components)}.",
+                        "impact": "Without a result, the interviewer cannot see the outcome of your decisions.",
+                        "drill_title": "Result-first STAR drill",
+                        "drill_instructions": "Answer in four beats: situation, task, action, measurable result. Keep each beat to one sentence.",
+                        "evidence_start_seconds": None,
+                        "evidence_end_seconds": None,
+                    }
+                )
+
+            if content.get("weaknesses"):
+                drill = (content.get("practice_drills") or [{}])[0]
+                habits.append(
+                    {
+                        "id": f"content-{question_number}",
+                        "title": "Make the trade-off explicit",
+                        "severity": 3,
+                        "observation": str(content["weaknesses"][0]),
+                        "impact": "Trade-offs show that your decision was deliberate and production-ready.",
+                        "drill_title": str(drill.get("title", "Trade-off explanation drill")),
+                        "drill_instructions": str(drill.get("instructions", "Name one benefit and one failure mode.")),
+                        "evidence_start_seconds": None,
+                        "evidence_end_seconds": None,
+                    }
+                )
+
+        if total_fillers:
+            first_filler = next(
+                (event for event in evidence_events if event["type"] == "filler"),
+                None,
+            )
+            habits.append(
+                {
+                    "id": "delivery-fillers",
+                    "title": "Replace filler clusters with a clean pause",
+                    "severity": min(5, 2 + total_fillers),
+                    "observation": f"Aptly detected {total_fillers} filler word{'s' if total_fillers != 1 else ''} in the recording.",
+                    "impact": "A short silent pause sounds more intentional than filling thinking time with 'um' or 'uh'.",
+                    "drill_title": "Two-beat pause drill",
+                    "drill_instructions": "Answer five prompts. Before each answer, take two silent beats, then begin with your headline.",
+                    "evidence_start_seconds": first_filler["start_seconds"] if first_filler else None,
+                    "evidence_end_seconds": first_filler["end_seconds"] if first_filler else None,
+                }
+            )
+
+        if total_pauses:
+            habits.append(
+                {
+                    "id": "delivery-pauses",
+                    "title": "Recover faster after a long pause",
+                    "severity": 3,
+                    "observation": f"{total_pauses} longer pause{'s' if total_pauses != 1 else ''} appeared between transcript words.",
+                    "impact": "A visible recovery phrase keeps the interviewer oriented while you think.",
+                    "drill_title": "Bridge phrase drill",
+                    "drill_instructions": "Practice saying 'I'll break that into two parts' before giving a structured answer.",
+                    "evidence_start_seconds": None,
+                    "evidence_end_seconds": None,
+                }
+            )
+
+        if average_wpm and not 130 <= average_wpm <= 160:
+            habits.append(
+                {
+                    "id": "delivery-pace",
+                    "title": "Bring your pace into the interview band",
+                    "severity": 3,
+                    "observation": f"Average speaking pace was {average_wpm:.0f} WPM; Aptly's coaching band is 130-160 WPM.",
+                    "impact": "A steadier pace gives the interviewer time to follow your reasoning.",
+                    "drill_title": "90-second pacing drill",
+                    "drill_instructions": "Read a technical explanation aloud for 90 seconds. Mark one breath every sentence and keep the headline first.",
+                    "evidence_start_seconds": None,
+                    "evidence_end_seconds": None,
+                }
+            )
+
+        unique_habits: list[dict[str, Any]] = []
+        seen_titles: set[str] = set()
+        for habit in sorted(habits, key=lambda value: value["severity"], reverse=True):
+            if habit["title"] in seen_titles:
+                continue
+            seen_titles.add(habit["title"])
+            unique_habits.append(habit)
+        top_habits = unique_habits[:3]
+
+        pace_score = 100.0 if not average_wpm else max(
+            0.0, 100.0 - abs(145.0 - average_wpm) * 1.2
+        )
+        filler_score = max(0.0, 100.0 - total_fillers * 12.0)
+        pause_score = max(0.0, 100.0 - total_pauses * 10.0)
+        delivery_score = round((pace_score + filler_score + pause_score) / 3, 1)
+        overall_score = round(
+            average_content_score * 0.65 + delivery_score * 0.35
+            if questions_review
+            else 0.0,
+            1,
+        )
+
+        weakest_question_number = None
+        scored_questions = [
+            (
+                item["question"]["sequence_number"],
+                float((item.get("content_metrics") or {}).get("overall_content_score", 101.0)),
+            )
+            for item in questions_review
+            if item.get("content_metrics")
+        ]
+        if scored_questions:
+            weakest_question_number = min(scored_questions, key=lambda value: value[1])[0]
+
+        return {
+            "overall_score": overall_score,
+            "content_score": round(average_content_score, 1),
+            "delivery_score": delivery_score,
+            "confidence_label": "Measured + evidence-linked" if questions_review else "Awaiting answers",
+            "strengths": list(dict.fromkeys(strengths))[:3],
+            "top_habits": top_habits,
+            "evidence_events": sorted(
+                evidence_events,
+                key=lambda event: (event["question_number"] or 0, event["start_seconds"]),
+            ),
+            "delivery": {
+                "score": delivery_score,
+                "pace_label": (
+                    "In coaching band" if 130 <= average_wpm <= 160 else "Needs calibration"
+                ),
+                "pace_note": (
+                    f"Average {average_wpm:.0f} WPM versus a 130-160 WPM coaching band."
+                    if average_wpm
+                    else "No timestamped speech was available for pace analysis."
+                ),
+                "camera_attention_estimate": None,
+                "camera_attention_reliability": None,
+                "voice_energy_trend": None,
+                "voice_energy_label": "Unavailable",
+                "metric_notes": [
+                    "Filler and pause metrics are deterministic from timestamped words.",
+                    "Camera-attention and voice-energy metrics will appear when browser telemetry is attached.",
+                ],
+            },
+            "recommended_repair_question": weakest_question_number,
+            "next_session_focus": (
+                top_habits[0]["title"]
+                if top_habits
+                else "Keep the headline-first structure and add one concrete result."
+            ),
+        }
+
     async def compile_review(self, interview_id: UUID) -> dict[str, Any]:
         """Compile a complete post-interview review view."""
         interview = await self.get_interview_detail(interview_id)
@@ -579,6 +831,11 @@ class InterviewService:
                     "question_text": q.question_text,
                     "expected_topics": q.expected_topics,
                     "prompt_version": q.prompt_version,
+                    "parent_question_id": q.parent_question_id,
+                    "root_question_id": q.root_question_id,
+                    "question_source": q.question_source,
+                    "follow_up_depth": q.follow_up_depth,
+                    "target_competency": q.target_competency,
                 },
                 "answer": None,
                 "transcript": None,
@@ -710,6 +967,14 @@ class InterviewService:
             if tech_depth_scores_list
             else 0.0
         )
+        report_card = self._build_report_card(
+            questions_review=questions_review,
+            average_content_score=avg_content,
+            average_wpm=avg_wpm,
+            total_duration_seconds=total_duration,
+            total_fillers=total_fillers,
+            total_pauses=total_pauses,
+        )
 
         return {
             "interview": {
@@ -753,4 +1018,5 @@ class InterviewService:
             "average_relevance_score": avg_relevance,
             "average_technical_depth_score": avg_tech_depth,
             "questions_review": questions_review,
+            "report_card": report_card,
         }

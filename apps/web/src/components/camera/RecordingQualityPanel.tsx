@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
-import { Activity, CheckCircle2, ChevronDown, ChevronUp, Cpu, Database, Mic, Video, Volume2 } from "lucide-react";
+import { Activity, ChevronDown, ChevronUp, Cpu, Mic, Video } from "lucide-react";
 
 export interface RecordingDiagnostics {
   micState: "CONNECTED" | "MUTED" | "DISCONNECTED";
@@ -40,7 +40,7 @@ export function RecordingQualityPanel({ diagnostics }: RecordingQualityPanelProp
         >
           <div className="flex items-center space-x-2">
             <Activity className="h-4 w-4 text-indigo-400 animate-pulse" />
-            <span className="font-semibold tracking-wide">Phase 3 Recording & Engine Diagnostics</span>
+            <span className="font-semibold tracking-wide">Capture integrity</span>
           </div>
           <div className="flex items-center space-x-2">
             <Badge variant={diagnostics.recordingState === "RECORDING" ? "destructive" : "outline"} className="text-[10px]">

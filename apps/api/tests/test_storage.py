@@ -159,3 +159,15 @@ async def test_local_storage_get_metadata(
     assert meta.checksum_sha256 is not None
     assert len(meta.checksum_sha256) == 64
     assert meta.size_bytes == len(b"test metadata")
+
+
+@pytest.mark.asyncio
+async def test_local_storage_blocks_metadata_and_traversal_keys(
+    local_storage: LocalStorageProvider,
+) -> None:
+    """Playback keys cannot escape the object namespace or expose sidecars."""
+    with pytest.raises(StorageError):
+        await local_storage.download("../outside.txt")
+
+    with pytest.raises(StorageError):
+        await local_storage.download(".metadata/sidecar.json")

@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Camera, CheckCircle2, Mic, ShieldAlert, Sparkles, Video } from "lucide-react";
+import { Camera, CheckCircle2, Sparkles } from "lucide-react";
 
 interface RecordingConsentModalProps {
   isOpen: boolean;
