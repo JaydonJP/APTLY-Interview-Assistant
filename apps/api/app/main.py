@@ -71,6 +71,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ),
         )
 
+    # Initialize database tables on startup for local dev
+    try:
+        from app.dependencies import get_async_engine
+        from app.models.base import Base
+        engine = get_async_engine(settings.database_url)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("database_schema_ready", db_url=settings.database_url)
+    except Exception as exc:
+        logger.warning("database_init_skipped", error=str(exc))
+
     yield  # Application is running
 
     logger.info("aptly_shutdown", app_name=settings.app_name)
