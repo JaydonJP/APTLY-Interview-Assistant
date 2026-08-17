@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import (
@@ -144,12 +144,23 @@ async def get_storage(
 
 
 @lru_cache
-def _get_llm_provider_instance(provider: str) -> LLMProvider:
+def _get_llm_provider_instance(
+    provider: str,
+    api_key: str = "",
+    model: str = "gpt-4o-mini",
+) -> LLMProvider:
     """Create and cache the LLM provider (singleton)."""
     if provider == "mock":
         logger.info("llm_provider_init", provider="mock")
         return MockLLMProvider()
-    # Phase 1+: add openai, anthropic, google implementations here
+    if provider in ("openai", "azure_openai", "anthropic", "google"):
+        from app.services.providers.openai_llm import OpenAILLMProvider
+
+        logger.info("llm_provider_init", provider="openai", model=model)
+        return OpenAILLMProvider(
+            api_key=api_key,
+            model=model or "gpt-4o-mini",
+        )
     msg = f"LLM provider '{provider}' is not yet implemented"
     raise NotImplementedError(msg)
 
@@ -158,7 +169,20 @@ async def get_llm_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LLMProvider:
     """FastAPI dependency: returns the configured LLM provider."""
-    return _get_llm_provider_instance(settings.llm_provider)
+    return _get_llm_provider_instance(
+        settings.llm_provider,
+        settings.llm_api_key,
+        settings.llm_model,
+    )
+
+
+async def get_content_analysis_service(
+    llm_provider: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> Any:
+    """FastAPI dependency: returns the ContentAnalysisService instance."""
+    from app.services.content_intelligence.service import ContentAnalysisService
+
+    return ContentAnalysisService(llm_provider=llm_provider)
 
 
 # ── TTS Provider ──────────────────────────────────────────────────────────────

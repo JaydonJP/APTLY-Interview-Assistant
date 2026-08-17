@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize database tables on startup for local dev
     try:
         import asyncio
+
         from app.dependencies import get_async_engine
         from app.models.base import Base
 

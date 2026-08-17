@@ -20,6 +20,7 @@ from app.dependencies import (
 from app.schemas.interviews import (
     AnswerCreateRequest,
     AnswerResponse,
+    ContentMetricsResponse,
     InterviewCreateRequest,
     InterviewDetailResponse,
     InterviewReviewResponse,
@@ -288,6 +289,33 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             created_at=m.created_at,
         )
 
+    content_metrics_res = None
+    if getattr(answer, "content_metrics", None):
+        cm = answer.content_metrics
+        content_metrics_res = ContentMetricsResponse(
+            id=cm.id,
+            answer_id=cm.answer_id,
+            question_type=cm.question_type,
+            relevance_score=cm.relevance_score,
+            technical_depth_score=cm.technical_depth_score,
+            completeness_score=cm.completeness_score,
+            structure_score=cm.structure_score,
+            evidence_score=cm.evidence_score,
+            overall_content_score=cm.overall_content_score,
+            strengths=cm.strengths_json,
+            weaknesses=cm.weaknesses_json,
+            star_analysis=cm.star_analysis_json,
+            claims=cm.claims_json,
+            evidence=cm.evidence_json,
+            feedback=cm.feedback_json,
+            practice_drills=cm.practice_drills_json,
+            reasoning_summary=cm.reasoning_summary,
+            provider=cm.provider,
+            model=cm.model,
+            prompt_version=cm.prompt_version,
+            created_at=cm.created_at,
+        )
+
     return AnswerResponse(
         id=answer.id,
         interview_id=answer.interview_id,
@@ -301,5 +329,6 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
         audio_size_bytes=answer.audio_size_bytes,
         transcript=transcript_res,
         speech_metrics=speech_metrics_res,
+        content_metrics=content_metrics_res,
         created_at=answer.created_at,
     )

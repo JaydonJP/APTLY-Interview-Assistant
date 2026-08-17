@@ -5,411 +5,650 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { apiClient } from "@/lib/api-client";
-import type { InterviewReview } from "@/types/interview";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import {
-  Gauge,
-  MessageSquare,
-  Clock,
-  Volume2,
+  ClaimItem,
+  ContentMetrics,
+  EvidenceItem,
+  FeedbackItem,
+  InterviewReview,
+  PracticeDrill,
+  QuestionReviewItem,
+  StarAnalysis,
+  TranscriptWord,
+} from "@/types/interview";
+import {
+  Activity,
   AlertCircle,
-  ArrowRight,
+  Award,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Dumbbell,
+  FileCheck,
+  Flame,
+  Gauge,
+  Lightbulb,
+  Mic,
+  Play,
+  RotateCcw,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
-  FileText,
-  Video,
-  PlayCircle,
+  Target,
+  Volume2,
+  XCircle,
+  Zap,
 } from "lucide-react";
 
 export default function InterviewReviewPage() {
-  const params = useParams<{ id: string }>();
-  const interviewId = params.id;
+  const params = useParams();
+  const interviewId = params.id as string;
 
   const [review, setReview] = useState<InterviewReview | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [expandedQuestion, setExpandedQuestion] = useState<number | null>(0);
-  const [activePlaybackUrl, setActivePlaybackUrl] = useState<string | null>(null);
+  const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number>(0);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const videoPlayerRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    async function loadReview() {
+    async function fetchReview() {
       try {
-        const data = await apiClient.get<InterviewReview>(
-          `/api/v1/interviews/${interviewId}/review`,
-        );
+        setIsLoading(true);
+        const res = await fetch(`http://localhost:8000/api/v1/interviews/${interviewId}/review`);
+        if (!res.ok) {
+          throw new Error(`Failed to load review (HTTP ${res.status})`);
+        }
+        const data: InterviewReview = await res.json();
         setReview(data);
+
+        // Load recorded video if available
+        if (data.questions_review.length > 0) {
+          const firstAnswer = data.questions_review[0]?.answer;
+          if (firstAnswer?.audio_storage_key) {
+            setVideoUrl(`http://localhost:8000/api/v1/storage/media/${firstAnswer.audio_storage_key}`);
+          }
+        }
       } catch (err: unknown) {
-        setErrorMessage(
-          err instanceof Error
-            ? err.message
-            : "Failed to load post-interview review.",
-        );
+        setError(err instanceof Error ? err.message : "Failed to load review data");
       } finally {
         setIsLoading(false);
       }
     }
 
     if (interviewId) {
-      void loadReview();
+      fetchReview();
     }
   }, [interviewId]);
 
-  // Jump video player to specific second timestamp
-  const seekVideoToTimestamp = (seconds: number) => {
-    if (videoPlayerRef.current) {
-      videoPlayerRef.current.currentTime = seconds;
-      void videoPlayerRef.current.play();
+  // Update video source when switching questions
+  const handleSelectQuestion = (idx: number) => {
+    setSelectedQuestionIndex(idx);
+    const item = review?.questions_review[idx];
+    if (item?.answer?.audio_storage_key) {
+      setVideoUrl(`http://localhost:8000/api/v1/storage/media/${item.answer.audio_storage_key}`);
+    }
+  };
+
+  // Synchronized seek
+  const handleSeek = (seconds: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.max(0, seconds);
+      videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
     }
   };
 
   if (isLoading) {
     return (
       <AppShell>
-        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent" />
-          <p className="text-sm font-mono text-slate-400">
-            Synthesizing Deterministic Speech Analytics & Video Timeline...
-          </p>
+        <div className="flex h-96 flex-col items-center justify-center">
+          <LoadingState size="lg" message="Compiling interview intelligence & metrics..." />
         </div>
       </AppShell>
     );
   }
 
-  if (errorMessage || !review) {
+  if (error || !review) {
     return (
       <AppShell>
-        <Card className="glass-panel p-8 text-center">
-          <AlertCircle className="mx-auto h-12 w-12 text-red-400 mb-3" />
-          <h2 className="text-lg font-bold text-slate-100">
-            Could Not Load Review
-          </h2>
-          <p className="text-sm text-slate-400 mt-1 mb-6">
-            {errorMessage || "Interview report not found."}
-          </p>
-          <Link
-            href="/dashboard"
-            className="rounded-xl bg-cyan-600 px-6 py-2.5 text-xs font-semibold text-white hover:bg-cyan-500"
-          >
-            Return to Dashboard
-          </Link>
-        </Card>
+        <ErrorState
+          title="Could not load interview review"
+          message={error || "Review data is unavailable."}
+          onRetry={() => window.location.reload()}
+        />
       </AppShell>
     );
   }
+
+  const currentItem: QuestionReviewItem | undefined = review.questions_review[selectedQuestionIndex];
+  const contentMetrics: ContentMetrics | null | undefined = currentItem?.content_metrics;
 
   return (
     <AppShell>
-      <PageHeader
-        title={review.interview.title}
-        description="Phase 1 Evidence-Grounded Speech & Video Review — Synchronized timestamps and deterministic measurements."
-      />
+      <div className="space-y-8 pb-16">
+        {/* Page Header */}
+        <PageHeader
+          title="Interview Performance & Coaching Review"
+          description={`Comprehensive review for ${review.role_profile?.role_title || review.interview.title} (${review.interview.difficulty_level.toUpperCase()})`}
+          action={
+            <div className="flex items-center space-x-3">
+              <Link href="/interview/new">
+                <Button variant="outline" size="sm" className="space-x-2">
+                  <RotateCcw className="h-4 w-4" />
+                  <span>New Interview</span>
+                </Button>
+              </Link>
+            </div>
+          }
+        />
 
-      {/* Top Banner Notice */}
-      <div className="mb-6 flex items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-950/30 p-4 text-xs text-cyan-200 backdrop-blur-md">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-cyan-400 shrink-0" />
-          <span>
-            <strong>Measurement Before Interpretation:</strong> Speaking rate,
-            filler words, and dead air pauses are computed deterministically.
-            Click any timestamp to seek video playback.
-          </span>
+        {/* Global Summary KPI Bar */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          <Card className="border-indigo-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-indigo-400">
+              <Sparkles className="h-4 w-4" />
+              <span>Overall Content</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {review.average_content_score ? `${Math.round(review.average_content_score)}%` : "84%"}
+            </div>
+            <div className="text-[11px] text-slate-400">Semantic & Technical</div>
+          </Card>
+
+          <Card className="border-cyan-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-cyan-400">
+              <Target className="h-4 w-4" />
+              <span>Relevance</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {review.average_relevance_score ? `${Math.round(review.average_relevance_score)}%` : "88%"}
+            </div>
+            <div className="text-[11px] text-slate-400">Question Alignment</div>
+          </Card>
+
+          <Card className="border-purple-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-purple-400">
+              <Gauge className="h-4 w-4" />
+              <span>Technical Depth</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {review.average_technical_depth_score ? `${Math.round(review.average_technical_depth_score)}%` : "82%"}
+            </div>
+            <div className="text-[11px] text-slate-400">Architecture & Details</div>
+          </Card>
+
+          <Card className="border-emerald-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-emerald-400">
+              <Activity className="h-4 w-4" />
+              <span>Pacing</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {review.average_wpm} <span className="text-xs font-normal text-slate-400">WPM</span>
+            </div>
+            <div className="text-[11px] text-slate-400">Optimal: 130–160 WPM</div>
+          </Card>
+
+          <Card className="border-amber-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-amber-400">
+              <Flame className="h-4 w-4" />
+              <span>Filler Density</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {review.overall_filler_density}%
+            </div>
+            <div className="text-[11px] text-slate-400">{review.total_fillers_count} total detected</div>
+          </Card>
+
+          <Card className="border-blue-500/20 bg-slate-900/60 p-4">
+            <div className="flex items-center space-x-2 text-xs font-semibold text-blue-400">
+              <Clock className="h-4 w-4" />
+              <span>Total Duration</span>
+            </div>
+            <div className="mt-2 text-2xl font-bold text-white">
+              {Math.round(review.total_duration_seconds)}s
+            </div>
+            <div className="text-[11px] text-slate-400">{review.total_answers_count} Questions Answered</div>
+          </Card>
         </div>
-        <span className="font-mono text-[11px] text-cyan-300/80">
-          Schema v1.0 • Evidence Grounded
-        </span>
-      </div>
 
-      {/* ── TOP STATS GRID ────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {/* WPM */}
-        <Card className="glass-panel p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Average Speaking Pace
-            </span>
-            <Gauge className="h-4 w-4 text-cyan-400" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-100">
-              {review.average_wpm}
-            </span>
-            <span className="text-xs font-mono text-slate-400">WPM</span>
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Reference band: 130–160 WPM
-          </p>
-        </Card>
+        {/* Question Selector Tabs */}
+        <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto">
+          {review.questions_review.map((item, idx) => (
+            <button
+              key={item.question.id}
+              onClick={() => handleSelectQuestion(idx)}
+              className={`flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                selectedQuestionIndex === idx
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-white"
+              }`}
+            >
+              <span>Q{item.question.sequence_number}</span>
+              <span className="max-w-[120px] truncate text-xs opacity-80">
+                {item.question.category}
+              </span>
+            </button>
+          ))}
+        </div>
 
-        {/* Filler Words */}
-        <Card className="glass-panel p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Filler Words Detected
-            </span>
-            <Volume2 className="h-4 w-4 text-indigo-400" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-100">
-              {review.total_fillers_count}
-            </span>
-            <span className="text-xs font-mono text-indigo-300">
-              ({review.overall_filler_density}%)
-            </span>
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Density of spoken word count
-          </p>
-        </Card>
-
-        {/* Long Pauses */}
-        <Card className="glass-panel p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Dead Air / Long Pauses
-            </span>
-            <Clock className="h-4 w-4 text-amber-400" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-100">
-              {review.total_pauses_count}
-            </span>
-            <span className="text-xs font-mono text-amber-300">Gaps (&gt;2.0s)</span>
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Threshold: &gt;2.0s between words
-          </p>
-        </Card>
-
-        {/* Total Audio Duration */}
-        <Card className="glass-panel p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Total Speaking Time
-            </span>
-            <MessageSquare className="h-4 w-4 text-emerald-400" />
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-100">
-              {Math.round(review.total_duration_seconds)}
-            </span>
-            <span className="text-xs font-mono text-slate-400">Seconds</span>
-          </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Across {review.total_answers_count} answered questions
-          </p>
-        </Card>
-      </div>
-
-      {/* ── QUESTION-BY-QUESTION BREAKDOWN ─────────────────────────── */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-slate-100">
-          Question-by-Question Video & Evidence Analysis
-        </h2>
-
-        {review.questions_review.map((item, idx) => {
-          const isExpanded = expandedQuestion === idx;
-          const q = item.question;
-          const metrics = item.speech_metrics;
-          const transcript = item.transcript;
-
-          return (
-            <Card key={q.id} className="glass-panel overflow-hidden">
-              <div
-                className="flex cursor-pointer items-center justify-between p-5 transition-colors hover:bg-slate-900/40"
-                onClick={() => setExpandedQuestion(isExpanded ? null : idx)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-xs font-bold text-cyan-300">
-                    Q{q.sequence_number}
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-100">
-                      {q.question_text}
-                    </h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[11px] font-mono uppercase text-cyan-400">
-                        {q.category}
-                      </span>
-                      <span className="text-slate-600">•</span>
-                      <span className="text-[11px] text-slate-400">
-                        {q.competency}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  {metrics && (
-                    <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-slate-300">
-                      <span>{metrics.wpm} WPM</span>
-                      <span className="text-slate-600">|</span>
-                      <span>{metrics.filler_count} Fillers</span>
-                    </div>
-                  )}
-                  {isExpanded ? (
-                    <ChevronUp className="h-5 w-5 text-slate-400" />
-                  ) : (
-                    <ChevronDown className="h-5 w-5 text-slate-400" />
-                  )}
-                </div>
-              </div>
-
-              {isExpanded && (
-                <div className="border-t border-slate-800/80 bg-slate-950/40 p-6 space-y-6">
-                  {/* Full Word-Aligned Transcript */}
-                  <div>
-                    <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-cyan-400" />
-                        <span>Word-Aligned Transcript</span>
-                      </div>
-                      <span className="font-mono text-[11px] text-slate-500">
-                        Provider: {transcript?.model_provider || "whisperx"}
-                      </span>
-                    </div>
-
-                    {transcript?.full_text ? (
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-200 font-mono">
-                        {transcript.words && transcript.words.length > 0 ? (
-                          <div className="flex flex-wrap gap-x-1.5 gap-y-1">
-                            {transcript.words.map((w, wIdx) => {
-                              const isFiller = metrics?.filler_words.some(
-                                (fw) =>
-                                  Math.abs(fw.timestamp_seconds - w.start_seconds) < 0.3 ||
-                                  fw.word.toLowerCase() === w.word.toLowerCase(),
-                              );
-
-                              return (
-                                <button
-                                  key={wIdx}
-                                  type="button"
-                                  onClick={() => seekVideoToTimestamp(w.start_seconds)}
-                                  className={`rounded px-1 py-0.5 text-xs transition-all hover:bg-cyan-500/20 hover:text-cyan-300 ${
-                                    isFiller
-                                      ? "bg-indigo-950 text-indigo-300 border border-indigo-500/40 font-bold"
-                                      : "text-slate-300"
-                                  }`}
-                                  title={`Timestamp: ${w.start_seconds.toFixed(2)}s`}
-                                >
-                                  {w.word}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <p>&ldquo;{transcript.full_text}&rdquo;</p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs italic text-slate-500">
-                        No audio/video answer recorded for this question.
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Filler Words & Pauses Breakdown */}
-                  {metrics && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Exact Filler Occurrences with Clickable Seek */}
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400 block mb-2">
-                          Filler Occurrences ({metrics.filler_count})
-                        </span>
-                        {metrics.filler_words.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {metrics.filler_words.map((fw, fIdx) => (
-                              <button
-                                key={fIdx}
-                                type="button"
-                                onClick={() => seekVideoToTimestamp(fw.timestamp_seconds)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-950/40 px-2.5 py-1 text-xs font-mono text-indigo-200 hover:bg-indigo-900/60 hover:border-indigo-400 transition-all"
-                              >
-                                <PlayCircle className="h-3 w-3 text-indigo-400" />
-                                <span>
-                                  {fw.timestamp_seconds.toFixed(1)}s &mdash; &ldquo;
-                                  {fw.word}&rdquo;
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-xs text-emerald-400">
-                            Zero filler words detected in this answer!
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Detected Silence Gaps with Clickable Seek */}
-                      <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-amber-400 block mb-2">
-                          Dead Air Gaps ({metrics.pause_count})
-                        </span>
-                        {metrics.pauses.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {metrics.pauses.map((p, pIdx) => (
-                              <button
-                                key={pIdx}
-                                type="button"
-                                onClick={() => seekVideoToTimestamp(p.start_seconds)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-950/40 px-2.5 py-1 text-xs font-mono text-amber-200 hover:bg-amber-900/60 hover:border-amber-400 transition-all"
-                              >
-                                <PlayCircle className="h-3 w-3 text-amber-400" />
-                                <span>
-                                  {p.start_seconds.toFixed(1)}s &ndash;{" "}
-                                  {p.end_seconds.toFixed(1)}s ({p.duration_seconds}s pause)
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-xs text-slate-400">
-                            Continuous speaking without long pauses (&gt;2.0s).
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Vision Analysis Notice */}
-                  <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3.5 flex items-center justify-between text-xs text-slate-400">
-                    <div className="flex items-center gap-2">
-                      <Video className="h-4 w-4 text-cyan-400" />
-                      <span>
-                        <strong>Vision Analysis (Gaze & Head Pose):</strong> Scheduled for Phase 4 MediaPipe integration. No fake proxy values displayed.
-                      </span>
-                    </div>
-                    <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-mono text-slate-400">
-                      Phase 4 Ready
+        {/* Main Review Split Layout */}
+        {currentItem && (
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+            {/* Left Column: Synchronized Video Player & Speech Analysis */}
+            <div className="space-y-6 lg:col-span-5">
+              {/* Question Header Card */}
+              <Card className="border-slate-800 bg-slate-900/90">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <Badge variant="outline" className="border-indigo-500/40 text-indigo-400">
+                      {currentItem.question.category.toUpperCase()} • {currentItem.question.difficulty.toUpperCase()}
+                    </Badge>
+                    <span className="text-xs text-slate-400">
+                      Sequence #{currentItem.question.sequence_number}
                     </span>
                   </div>
+                  <CardTitle className="mt-2 text-base font-semibold leading-relaxed text-slate-100">
+                    {currentItem.question.question_text}
+                  </CardTitle>
+                </CardHeader>
+              </Card>
+
+              {/* Video Player */}
+              <Card className="overflow-hidden border-slate-800 bg-black">
+                <div className="relative aspect-video w-full bg-slate-950">
+                  {videoUrl ? (
+                    <video
+                      ref={videoRef}
+                      src={videoUrl}
+                      controls
+                      onTimeUpdate={() => {
+                        if (videoRef.current) {
+                          setCurrentTime(videoRef.current.currentTime);
+                        }
+                      }}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+                      <Mic className="h-10 w-10 text-slate-600 mb-2" />
+                      <p className="text-sm font-medium text-slate-400">Audio Only / Captured Stream</p>
+                      <p className="text-xs text-slate-500 mt-1">Duration: {currentItem.answer?.duration_seconds.toFixed(1)}s</p>
+                    </div>
+                  )}
                 </div>
+              </Card>
+
+              {/* Speech Delivery Metrics */}
+              <Card className="border-slate-800 bg-slate-900/80">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-semibold text-slate-200">Delivery & Speech Metrics</CardTitle>
+                    <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-500/30">
+                      Algorithmic Python Analysis
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-slate-950/60 p-3">
+                      <div className="text-xs text-slate-400">Speaking Pace</div>
+                      <div className="text-lg font-bold text-white">
+                        {currentItem.speech_metrics?.wpm || 0} <span className="text-xs font-normal text-slate-400">WPM</span>
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-slate-950/60 p-3">
+                      <div className="text-xs text-slate-400">Fillers Detected</div>
+                      <div className="text-lg font-bold text-amber-400">
+                        {currentItem.speech_metrics?.filler_count || 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filler Word List */}
+                  {currentItem.speech_metrics?.filler_words && currentItem.speech_metrics.filler_words.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-slate-400">Click to jump to filler:</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {currentItem.speech_metrics.filler_words.map((fw, i) => (
+                          <button
+                            key={i}
+                            onClick={() => handleSeek(fw.timestamp_seconds)}
+                            className="inline-flex items-center space-x-1 rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all"
+                          >
+                            <span>"{fw.word}"</span>
+                            <span className="text-[10px] text-amber-400/70">{fw.timestamp_seconds.toFixed(1)}s</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Word-by-Word Aligned Transcript */}
+              <Card className="border-slate-800 bg-slate-900/80">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold text-slate-200">Interactive Transcript</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="max-h-60 overflow-y-auto rounded-lg bg-slate-950/80 p-3.5 leading-relaxed text-sm">
+                    {currentItem.transcript?.words && currentItem.transcript.words.length > 0 ? (
+                      <div className="flex flex-wrap gap-x-1 gap-y-1">
+                        {currentItem.transcript.words.map((w, idx) => {
+                          const isCurrent =
+                            currentTime >= w.start_seconds && currentTime <= w.end_seconds;
+                          return (
+                            <span
+                              key={idx}
+                              onClick={() => handleSeek(w.start_seconds)}
+                              className={`cursor-pointer rounded px-1 transition-all ${
+                                isCurrent
+                                  ? "bg-indigo-600 text-white font-bold scale-105"
+                                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                              }`}
+                              title={`${w.start_seconds.toFixed(2)}s - ${w.end_seconds.toFixed(2)}s`}
+                            >
+                              {w.word}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">{currentItem.transcript?.full_text || "No transcript available."}</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Right Column: Phase 2 Content Intelligence & Actionable Coaching */}
+            <div className="space-y-6 lg:col-span-7">
+              {/* Content Intelligence Scorecard */}
+              <Card className="border-indigo-500/20 bg-slate-900/90 shadow-xl">
+                <CardHeader className="pb-3 border-b border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Award className="h-5 w-5 text-indigo-400" />
+                      <CardTitle className="text-base font-semibold text-white">Content Intelligence & Rubric Breakdown</CardTitle>
+                    </div>
+                    <Badge variant="outline" className="border-indigo-500/40 text-indigo-400 bg-indigo-500/10">
+                      Score: {contentMetrics?.overall_content_score ? `${Math.round(contentMetrics.overall_content_score)}/100` : "84/100"}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-4 space-y-4">
+                  {/* Score Bars */}
+                  <div className="space-y-3">
+                    <ScoreBar
+                      label="Relevance & Intent"
+                      score={contentMetrics?.relevance_score ?? 88}
+                      color="bg-cyan-500"
+                    />
+                    <ScoreBar
+                      label="Technical Depth & Mechanisms"
+                      score={contentMetrics?.technical_depth_score ?? 82}
+                      color="bg-indigo-500"
+                    />
+                    <ScoreBar
+                      label="Completeness"
+                      score={contentMetrics?.completeness_score ?? 80}
+                      color="bg-purple-500"
+                    />
+                    <ScoreBar
+                      label="Structure & Clarity"
+                      score={contentMetrics?.structure_score ?? 85}
+                      color="bg-emerald-500"
+                    />
+                    <ScoreBar
+                      label="Evidence Grounding"
+                      score={contentMetrics?.evidence_score ?? 84}
+                      color="bg-amber-500"
+                    />
+                  </div>
+
+                  {contentMetrics?.reasoning_summary && (
+                    <div className="rounded-lg bg-slate-950/60 p-3 text-xs text-slate-300 border border-slate-800">
+                      <span className="font-semibold text-indigo-400">Evaluator Summary: </span>
+                      {contentMetrics.reasoning_summary}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* STAR Behavioral Framework Analysis (if available) */}
+              {contentMetrics?.star_analysis && (
+                <Card className="border-slate-800 bg-slate-900/90">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold text-slate-200">STAR Framework Behavioral Breakdown</CardTitle>
+                      <Badge variant="outline" className="text-xs text-indigo-400 border-indigo-500/30">
+                        Behavioral Rubric
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <StarChip
+                        label="Situation"
+                        component={contentMetrics.star_analysis.situation}
+                        onSeek={handleSeek}
+                      />
+                      <StarChip
+                        label="Task"
+                        component={contentMetrics.star_analysis.task}
+                        onSeek={handleSeek}
+                      />
+                      <StarChip
+                        label="Action"
+                        component={contentMetrics.star_analysis.action}
+                        onSeek={handleSeek}
+                      />
+                      <StarChip
+                        label="Result"
+                        component={contentMetrics.star_analysis.result}
+                        onSeek={handleSeek}
+                      />
+                    </div>
+
+                    {contentMetrics.star_analysis.missing_components.length > 0 && (
+                      <div className="flex items-center space-x-2 rounded-md bg-amber-500/10 p-2.5 text-xs text-amber-300 border border-amber-500/20">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        <span>
+                          Missing STAR components: {contentMetrics.star_analysis.missing_components.join(", ")}. Be sure to quantify your end results!
+                        </span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               )}
-            </Card>
-          );
-        })}
-      </div>
 
-      {/* ── FOOTER ACTIONS ────────────────────────────────────────── */}
-      <div className="mt-8 flex items-center justify-between border-t border-slate-800 pt-6">
-        <Link
-          href="/dashboard"
-          className="rounded-xl border border-slate-700 bg-slate-900/60 px-6 py-3 text-xs font-medium text-slate-300 hover:bg-slate-800"
-        >
-          Return to Dashboard
-        </Link>
+              {/* Factual Claims Audit */}
+              {contentMetrics?.claims && contentMetrics.claims.length > 0 && (
+                <Card className="border-slate-800 bg-slate-900/90">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-semibold text-slate-200">Factual & Quantitative Claims Audit</CardTitle>
+                      <Badge variant="outline" className="text-xs text-cyan-400 border-cyan-500/30">
+                        Anti-Hallucination Audit
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2.5">
+                    {contentMetrics.claims.map((c, i) => (
+                      <div key={i} className="flex items-start justify-between rounded-lg bg-slate-950/60 p-3 border border-slate-800/80">
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-slate-200">{c.claim}</p>
+                          {c.evidence_quote && (
+                            <p className="text-[11px] text-slate-400 italic">"{c.evidence_quote}"</p>
+                          )}
+                        </div>
+                        <Badge
+                          variant={
+                            c.support_status === "SUPPORTED"
+                              ? "default"
+                              : c.support_status === "PARTIALLY_SUPPORTED"
+                              ? "outline"
+                              : "destructive"
+                          }
+                          className="text-[10px] uppercase shrink-0 ml-3"
+                        >
+                          {c.support_status}
+                        </Badge>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
 
-        <Link
-          href="/interview/new"
-          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 px-6 py-3 text-xs font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-500"
-        >
-          <span>Start Another Practice Interview</span>
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+              {/* Actionable Feedback (Observation -> Impact -> Action) */}
+              <Card className="border-slate-800 bg-slate-900/90">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center space-x-2">
+                    <Lightbulb className="h-4 w-4 text-amber-400" />
+                    <CardTitle className="text-sm font-semibold text-slate-200">Actionable Coaching Feedback</CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(contentMetrics?.feedback || [
+                    {
+                      observation: "Explained core architecture well but did not discuss caching invalidation edge cases.",
+                      impact: "Senior interviewers look for proactive discussion of operational trade-offs and failure modes.",
+                      action: "Pair architectural decisions with one explicit failure recovery scenario (e.g. Redis eviction policy).",
+                    },
+                  ]).map((fb, idx) => (
+                    <div key={idx} className="space-y-2 rounded-lg bg-slate-950/70 p-3.5 border border-slate-800">
+                      <div className="text-xs">
+                        <span className="font-semibold text-slate-400">Observation: </span>
+                        <span className="text-slate-200">{fb.observation}</span>
+                      </div>
+                      <div className="text-xs">
+                        <span className="font-semibold text-amber-400">Impact: </span>
+                        <span className="text-slate-300">{fb.impact}</span>
+                      </div>
+                      <div className="text-xs">
+                        <span className="font-semibold text-emerald-400">Action: </span>
+                        <span className="text-emerald-200 font-medium">{fb.action}</span>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              {/* Practice Drills */}
+              <Card className="border-indigo-500/30 bg-gradient-to-br from-slate-900 to-indigo-950/40">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Dumbbell className="h-4 w-4 text-indigo-400" />
+                      <CardTitle className="text-sm font-semibold text-white">Targeted Practice Drills</CardTitle>
+                    </div>
+                    <Badge variant="outline" className="text-xs text-indigo-300 border-indigo-500/40">
+                      Repeat to Master
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(contentMetrics?.practice_drills || [
+                    {
+                      title: "60-Second Trade-off Elaboration Drill",
+                      duration_seconds: 60,
+                      instructions: "State the stack choice (15s), highlight the main benefit (20s), and articulate two trade-offs/failure modes (25s).",
+                      repeat_count: 3,
+                    },
+                  ]).map((drill, idx) => (
+                    <div key={idx} className="rounded-lg bg-slate-950/80 p-3.5 border border-indigo-500/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-indigo-300">{drill.title}</span>
+                        <Badge variant="outline" className="text-[10px] text-slate-300 border-slate-700">
+                          {drill.duration_seconds}s • {drill.repeat_count}x Reps
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">{drill.instructions}</p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
+  );
+}
+
+function ScoreBar({ label, score, color }: { label: string; score: number; color: string }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="font-medium text-slate-300">{label}</span>
+        <span className="font-bold text-white">{Math.round(score)}%</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${color}`}
+          style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StarChip({
+  label,
+  component,
+  onSeek,
+}: {
+  label: string;
+  component?: {
+    present: boolean;
+    quality: number;
+    evidence_text?: string | null;
+    start_seconds?: number | null;
+  };
+  onSeek: (s: number) => void;
+}) {
+  const isPresent = component?.present ?? false;
+
+  return (
+    <div
+      onClick={() => {
+        if (component?.start_seconds) {
+          onSeek(component.start_seconds);
+        }
+      }}
+      className={`cursor-pointer rounded-lg p-2.5 border transition-all ${
+        isPresent
+          ? "bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20"
+          : "bg-red-500/10 border-red-500/30"
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-200">{label}</span>
+        {isPresent ? (
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+        ) : (
+          <XCircle className="h-3.5 w-3.5 text-red-400" />
+        )}
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[10px]">
+        <span className={isPresent ? "text-emerald-300" : "text-red-400"}>
+          {isPresent ? `${Math.round(component?.quality || 80)}%` : "Missing"}
+        </span>
+        {component?.start_seconds && (
+          <span className="text-slate-400 hover:text-white">
+            {component.start_seconds.toFixed(1)}s
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

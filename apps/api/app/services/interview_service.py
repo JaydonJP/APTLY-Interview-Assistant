@@ -27,6 +27,8 @@ from app.models.job import Job, RoleProfile
 from app.models.metrics import SpeechMetrics
 from app.models.question import Question
 from app.models.transcript import Transcript
+from app.schemas.content_intelligence import ContentAnalysisInput
+from app.services.content_intelligence.service import ContentAnalysisService
 from app.services.providers.base import (
     LLMProvider,
     TranscriptionProvider,
@@ -92,6 +94,7 @@ class InterviewService:
         self.role_analyzer = RoleAnalyzerService(llm_provider)
         self.question_generator = QuestionGeneratorService(llm_provider)
         self.speech_metrics_service = SpeechMetricsService()
+        self.content_analysis_service = ContentAnalysisService(llm_provider)
 
     def transition_state(self, interview: Interview, new_status: str) -> None:
         """Enforce strict state machine transitions."""
@@ -191,6 +194,7 @@ class InterviewService:
                 selectinload(Interview.questions),
                 selectinload(Interview.answers).selectinload(Answer.transcript),
                 selectinload(Interview.answers).selectinload(Answer.speech_metrics),
+                selectinload(Interview.answers).selectinload(Answer.content_metrics),
                 selectinload(Interview.answers).selectinload(Answer.question),
             )
         )
@@ -386,6 +390,47 @@ class InterviewService:
         )
         self.db.add(speech_metrics)
 
+        # Step C: Phase 2 Content Intelligence Analysis
+        try:
+            question = await self.db.get(Question, answer.question_id)
+            interview = await self.db.get(Interview, answer.interview_id)
+            role_profile = None
+            if interview and interview.role_profile_id:
+                role_profile = await self.db.get(RoleProfile, interview.role_profile_id)
+
+            analysis_input = ContentAnalysisInput(
+                role_title=role_profile.role_title if role_profile else "Software Engineer",
+                seniority=role_profile.seniority if role_profile else "Mid-Level",
+                domain=role_profile.domain if role_profile else "Engineering",
+                technical_skills=role_profile.technical_skills if role_profile else [],
+                question_text=question.question_text if question else "Technical question",
+                question_category=question.category if question else "technical",
+                expected_topics=question.expected_topics if question else [],
+                full_transcript=transcription_res.text,
+                words=words_data,
+                duration_seconds=answer.duration_seconds,
+            )
+
+            content_result = await self.content_analysis_service.analyze_answer(analysis_input)
+            await self.content_analysis_service.persist_content_metrics(
+                db=self.db,
+                answer_id=str(answer.id),
+                result=content_result,
+                provider=getattr(self.llm_provider, "PROVIDER_NAME", "mock"),
+                model=getattr(self.llm_provider, "MODEL_NAME", "mock-llm-v2"),
+            )
+            logger.info(
+                "content_intelligence_completed",
+                answer_id=str(answer.id),
+                score=content_result.overall_content_score,
+            )
+        except Exception as content_err:
+            logger.error(
+                "content_intelligence_failed",
+                answer_id=str(answer.id),
+                error=str(content_err),
+            )
+
         answer.status = "transcribed"
         await self.db.commit()
         await self.db.refresh(answer)
@@ -457,6 +502,9 @@ class InterviewService:
         total_fillers = 0
         total_pauses = 0
         wpm_list: list[float] = []
+        content_scores_list: list[float] = []
+        relevance_scores_list: list[float] = []
+        tech_depth_scores_list: list[float] = []
         questions_review: list[dict[str, Any]] = []
 
         # Map answers by question_id
@@ -480,6 +528,7 @@ class InterviewService:
                 "answer": None,
                 "transcript": None,
                 "speech_metrics": None,
+                "content_metrics": None,
             }
 
             if ans:
@@ -555,11 +604,56 @@ class InterviewService:
                         "created_at": m.created_at,
                     }
 
+                if ans.content_metrics:
+                    cm = ans.content_metrics
+                    content_scores_list.append(cm.overall_content_score)
+                    relevance_scores_list.append(cm.relevance_score)
+                    tech_depth_scores_list.append(cm.technical_depth_score)
+
+                    item["content_metrics"] = {
+                        "id": cm.id,
+                        "answer_id": cm.answer_id,
+                        "question_type": cm.question_type,
+                        "relevance_score": cm.relevance_score,
+                        "technical_depth_score": cm.technical_depth_score,
+                        "completeness_score": cm.completeness_score,
+                        "structure_score": cm.structure_score,
+                        "evidence_score": cm.evidence_score,
+                        "overall_content_score": cm.overall_content_score,
+                        "strengths": cm.strengths_json,
+                        "weaknesses": cm.weaknesses_json,
+                        "star_analysis": cm.star_analysis_json,
+                        "claims": cm.claims_json,
+                        "evidence": cm.evidence_json,
+                        "feedback": cm.feedback_json,
+                        "practice_drills": cm.practice_drills_json,
+                        "reasoning_summary": cm.reasoning_summary,
+                        "provider": cm.provider,
+                        "model": cm.model,
+                        "prompt_version": cm.prompt_version,
+                        "created_at": cm.created_at,
+                    }
+
             questions_review.append(item)
 
         avg_wpm = round(sum(wpm_list) / len(wpm_list), 1) if wpm_list else 0.0
         overall_filler_density = (
             round((total_fillers / total_words) * 100, 2) if total_words > 0 else 0.0
+        )
+        avg_content = (
+            round(sum(content_scores_list) / len(content_scores_list), 1)
+            if content_scores_list
+            else 0.0
+        )
+        avg_relevance = (
+            round(sum(relevance_scores_list) / len(relevance_scores_list), 1)
+            if relevance_scores_list
+            else 0.0
+        )
+        avg_tech_depth = (
+            round(sum(tech_depth_scores_list) / len(tech_depth_scores_list), 1)
+            if tech_depth_scores_list
+            else 0.0
         )
 
         return {
@@ -600,5 +694,8 @@ class InterviewService:
             "total_fillers_count": total_fillers,
             "overall_filler_density": overall_filler_density,
             "total_pauses_count": total_pauses,
+            "average_content_score": avg_content,
+            "average_relevance_score": avg_relevance,
+            "average_technical_depth_score": avg_tech_depth,
             "questions_review": questions_review,
         }

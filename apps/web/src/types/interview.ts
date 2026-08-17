@@ -1,5 +1,5 @@
 /**
- * APTLY — Complete Phase 1 Interview Types & Schemas
+ * APTLY — Phase 2 Interview, Speech & Content Intelligence Types
  */
 
 export type InterviewStatus =
@@ -14,6 +14,28 @@ export type InterviewStatus =
   | "completing"
   | "completed"
   | "failed";
+
+export type QuestionType =
+  | "introductory"
+  | "behavioral"
+  | "technical"
+  | "project"
+  | "situational"
+  | "system_design";
+
+export type ClaimSupportStatus =
+  | "SUPPORTED"
+  | "PARTIALLY_SUPPORTED"
+  | "UNSUPPORTED"
+  | "NOT_ASSESSABLE";
+
+export type EvidenceType =
+  | "STRENGTH"
+  | "WEAKNESS"
+  | "CLAIM"
+  | "STAR"
+  | "FEEDBACK"
+  | "TECHNICAL_POINT";
 
 export interface RoleProfile {
   id: string;
@@ -100,6 +122,75 @@ export interface Transcript {
   created_at: string;
 }
 
+export interface StarComponent {
+  present: boolean;
+  quality: number;
+  evidence_text?: string | null;
+  start_seconds?: number | null;
+  end_seconds?: number | null;
+}
+
+export interface StarAnalysis {
+  situation: StarComponent;
+  task: StarComponent;
+  action: StarComponent;
+  result: StarComponent;
+  missing_components: string[];
+}
+
+export interface ClaimItem {
+  claim: string;
+  support_status: ClaimSupportStatus;
+  evidence_quote?: string | null;
+  start_seconds?: number | null;
+}
+
+export interface EvidenceItem {
+  id: string;
+  type: EvidenceType;
+  text: string;
+  start_seconds: number;
+  end_seconds: number;
+  confidence: number;
+}
+
+export interface FeedbackItem {
+  observation: string;
+  impact: string;
+  action: string;
+}
+
+export interface PracticeDrill {
+  title: string;
+  duration_seconds: number;
+  instructions: string;
+  repeat_count: number;
+}
+
+export interface ContentMetrics {
+  id: string;
+  answer_id: string;
+  question_type: QuestionType | string;
+  relevance_score: number;
+  technical_depth_score: number;
+  completeness_score: number;
+  structure_score: number;
+  evidence_score: number;
+  overall_content_score: number;
+  strengths: string[];
+  weaknesses: string[];
+  star_analysis?: StarAnalysis | null;
+  claims: ClaimItem[];
+  evidence: EvidenceItem[];
+  feedback: FeedbackItem[];
+  practice_drills: PracticeDrill[];
+  reasoning_summary: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  created_at: string;
+}
+
 export interface Answer {
   id: string;
   interview_id: string;
@@ -113,6 +204,7 @@ export interface Answer {
   audio_size_bytes?: number | null;
   transcript?: Transcript | null;
   speech_metrics?: SpeechMetrics | null;
+  content_metrics?: ContentMetrics | null;
   created_at: string;
 }
 
@@ -137,6 +229,7 @@ export interface QuestionReviewItem {
   answer?: Answer | null;
   transcript?: Transcript | null;
   speech_metrics?: SpeechMetrics | null;
+  content_metrics?: ContentMetrics | null;
 }
 
 export interface InterviewReview {
@@ -159,5 +252,8 @@ export interface InterviewReview {
   total_fillers_count: number;
   overall_filler_density: number;
   total_pauses_count: number;
+  average_content_score?: number;
+  average_relevance_score?: number;
+  average_technical_depth_score?: number;
   questions_review: QuestionReviewItem[];
 }

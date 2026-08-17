@@ -11,6 +11,13 @@ from uuid import UUID
 from pydantic import Field
 
 from app.schemas.common import AptlyBaseModel, VersionedSchema
+from app.schemas.content_intelligence import (
+    ClaimItem,
+    EvidenceItem,
+    FeedbackItem,
+    PracticeDrill,
+    StarAnalysis,
+)
 from app.schemas.jobs import RoleProfileResponse
 
 # ── Question Schemas ──────────────────────────────────────────────────────────
@@ -82,6 +89,35 @@ class TranscriptResponse(VersionedSchema):
     created_at: datetime
 
 
+# ── Content Intelligence Schemas ───────────────────────────────────────────
+
+
+class ContentMetricsResponse(VersionedSchema):
+    """Persisted semantic content intelligence for an answer."""
+
+    id: UUID
+    answer_id: UUID
+    question_type: str
+    relevance_score: float
+    technical_depth_score: float
+    completeness_score: float
+    structure_score: float
+    evidence_score: float
+    overall_content_score: float
+    strengths: list[str] = Field(default_factory=list)
+    weaknesses: list[str] = Field(default_factory=list)
+    star_analysis: StarAnalysis | None = None
+    claims: list[ClaimItem] = Field(default_factory=list)
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    feedback: list[FeedbackItem] = Field(default_factory=list)
+    practice_drills: list[PracticeDrill] = Field(default_factory=list)
+    reasoning_summary: str = ""
+    provider: str = "mock"
+    model: str = "gpt-4o-mini"
+    prompt_version: str = "content-v1.0"
+    created_at: datetime
+
+
 # ── Answer Schemas ────────────────────────────────────────────────────────────
 
 
@@ -106,6 +142,7 @@ class AnswerResponse(AptlyBaseModel):
     audio_size_bytes: int | None = None
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
+    content_metrics: ContentMetricsResponse | None = None
     created_at: datetime
 
 
@@ -163,6 +200,7 @@ class QuestionReviewItem(AptlyBaseModel):
     answer: AnswerResponse | None = None
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
+    content_metrics: ContentMetricsResponse | None = None
 
 
 class InterviewReviewResponse(VersionedSchema):
@@ -176,4 +214,7 @@ class InterviewReviewResponse(VersionedSchema):
     total_fillers_count: int
     overall_filler_density: float
     total_pauses_count: int
+    average_content_score: float = 0.0
+    average_relevance_score: float = 0.0
+    average_technical_depth_score: float = 0.0
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)

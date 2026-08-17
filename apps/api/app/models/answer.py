@@ -14,6 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.content_metrics import ContentMetrics
     from app.models.interview import Interview
     from app.models.metrics import SpeechMetrics
     from app.models.question import Question
@@ -71,6 +72,13 @@ class Answer(UUIDMixin, TimestampMixin, Base):
     )
     speech_metrics: Mapped[SpeechMetrics | None] = relationship(
         "SpeechMetrics",
+        back_populates="answer",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    content_metrics: Mapped[ContentMetrics | None] = relationship(
+        "ContentMetrics",
         back_populates="answer",
         uselist=False,
         lazy="selectin",
