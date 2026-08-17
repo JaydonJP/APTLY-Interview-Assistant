@@ -1,0 +1,182 @@
+"""
+APTLY API — FastAPI Dependency Injection
+
+Provides reusable FastAPI dependencies for:
+- Application settings
+- Database sessions
+- AI/ML providers (LLM, TTS, Transcription)
+- Storage provider
+
+All providers are selected based on configuration at startup.
+In Phase 0, all AI providers default to mock implementations.
+
+Usage in a route handler:
+    @router.get("/example")
+    async def example(
+        settings: Annotated[Settings, Depends(get_settings)],
+        db: Annotated[AsyncSession, Depends(get_db)],
+        llm: Annotated[LLMProvider, Depends(get_llm_provider)],
+    ):
+        ...
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator
+from functools import lru_cache
+from typing import Annotated
+
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from app.config import Settings, get_settings
+from app.core.logging import get_logger
+from app.services.providers.base import LLMProvider, TranscriptionProvider, TTSProvider
+from app.services.providers.mock_llm import MockLLMProvider
+from app.services.providers.mock_transcription import MockTranscriptionProvider
+from app.services.providers.mock_tts import MockTTSProvider
+from app.services.storage.base import StorageProvider
+from app.services.storage.local import LocalStorageProvider
+
+logger = get_logger(__name__)
+
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+
+@lru_cache
+def get_async_engine(database_url: str) -> AsyncEngine:
+    """Create and cache the async SQLAlchemy engine."""
+    return create_async_engine(
+        database_url,
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+
+
+@lru_cache
+def get_session_factory(database_url: str) -> async_sessionmaker[AsyncSession]:
+    """Create and cache the async session factory."""
+    engine = get_async_engine(database_url)
+    return async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autocommit=False,
+        autoflush=False,
+    )
+
+
+async def get_db(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency: yields a database session per request.
+
+    The session is automatically committed on success
+    and rolled back on exception.
+    """
+    session_factory = get_session_factory(settings.database_url)
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+# ── Storage Provider ──────────────────────────────────────────────────────────
+
+
+@lru_cache
+def _get_storage_provider_instance(
+    provider: str,
+    endpoint: str,
+) -> StorageProvider:
+    """Create and cache the storage provider (singleton per configuration)."""
+    if provider == "local":
+        logger.info("storage_provider_init", provider="local", endpoint=endpoint)
+        return LocalStorageProvider(root_dir=endpoint)
+    # Phase 1+: add s3, supabase, r2 implementations here
+    msg = f"Storage provider '{provider}' is not yet implemented"
+    raise NotImplementedError(msg)
+
+
+async def get_storage(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StorageProvider:
+    """FastAPI dependency: returns the configured storage provider."""
+    return _get_storage_provider_instance(
+        settings.storage_provider,
+        settings.storage_endpoint,
+    )
+
+
+# ── LLM Provider ─────────────────────────────────────────────────────────────
+
+
+@lru_cache
+def _get_llm_provider_instance(provider: str) -> LLMProvider:
+    """Create and cache the LLM provider (singleton)."""
+    if provider == "mock":
+        logger.info("llm_provider_init", provider="mock")
+        return MockLLMProvider()
+    # Phase 1+: add openai, anthropic, google implementations here
+    msg = f"LLM provider '{provider}' is not yet implemented"
+    raise NotImplementedError(msg)
+
+
+async def get_llm_provider(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LLMProvider:
+    """FastAPI dependency: returns the configured LLM provider."""
+    return _get_llm_provider_instance(settings.llm_provider)
+
+
+# ── TTS Provider ──────────────────────────────────────────────────────────────
+
+
+@lru_cache
+def _get_tts_provider_instance(provider: str) -> TTSProvider:
+    """Create and cache the TTS provider (singleton)."""
+    if provider == "mock":
+        logger.info("tts_provider_init", provider="mock")
+        return MockTTSProvider()
+    # Phase 1+: add elevenlabs, openai implementations here
+    msg = f"TTS provider '{provider}' is not yet implemented"
+    raise NotImplementedError(msg)
+
+
+async def get_tts_provider(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TTSProvider:
+    """FastAPI dependency: returns the configured TTS provider."""
+    return _get_tts_provider_instance(settings.tts_provider)
+
+
+# ── Transcription Provider ────────────────────────────────────────────────────
+
+
+@lru_cache
+def _get_transcription_provider_instance(provider: str) -> TranscriptionProvider:
+    """Create and cache the transcription provider (singleton)."""
+    if provider == "mock":
+        logger.info("transcription_provider_init", provider="mock")
+        return MockTranscriptionProvider()
+    # Phase 1+: add whisper, whisperx, deepgram implementations here
+    msg = f"Transcription provider '{provider}' is not yet implemented"
+    raise NotImplementedError(msg)
+
+
+async def get_transcription_provider(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> TranscriptionProvider:
+    """FastAPI dependency: returns the configured transcription provider."""
+    return _get_transcription_provider_instance(settings.transcription_provider)

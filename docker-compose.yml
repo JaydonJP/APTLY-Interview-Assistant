@@ -1,0 +1,66 @@
+version: "3.9"
+
+# ============================================================
+# APTLY — Docker Compose (Local Development)
+# ============================================================
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose down -v        # Stop and DELETE volumes (fresh start)
+#   docker compose logs -f        # Tail logs
+#   docker compose ps             # Check status
+# ============================================================
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: aptly_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aptly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aptly_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aptly_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aptly} -d ${POSTGRES_DB:-aptly_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aptly_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+# ─── Volumes ────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    name: aptly_postgres_data
+  redis_data:
+    name: aptly_redis_data
+
+# ─── Networks ───────────────────────────────────────────────
+# Default network is created automatically by Compose.
+# Named here for future service additions.
+networks:
+  default:
+    name: aptly_network

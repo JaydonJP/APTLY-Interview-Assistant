@@ -1,0 +1,96 @@
+# ============================================================
+# APTLY — .gitignore
+# ============================================================
+
+# ─── Node / Frontend ────────────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+build/
+.turbo/
+.vercel/
+*.tsbuildinfo
+
+# ─── Python / Backend ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# ─── Environment & Secrets ──────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+!.env.example
+
+# ─── Media / Uploads (NEVER commit raw media) ───────────────
+storage/
+uploads/
+*.mp4
+*.webm
+*.ogg
+*.wav
+*.mp3
+*.m4a
+
+# ─── Database ────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ─── Docker ──────────────────────────────────────────────────
+# Keep docker-compose.yml but ignore local overrides
+docker-compose.override.yml
+
+# ─── IDE & OS ────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Testing ─────────────────────────────────────────────────
+coverage/
+.playwright/
+playwright-report/
+test-results/
+
+# ─── Package managers ────────────────────────────────────────
+.npm/
+.yarn/
+yarn-error.log
+
+# ─── Alembic ─────────────────────────────────────────────────
+# Keep migrations but not pycache inside them
+apps/api/alembic/versions/__pycache__/
+
+# ─── Local dev artifacts ─────────────────────────────────────
+.local/
+tmp/
+scratch/
