@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface UseMediaCaptureOptions {
   enableVideo?: boolean;
   enableAudio?: boolean;
-  videoConstraints?: MediaTrackConstraints;
 }
 
 export interface MediaCaptureState {
@@ -33,14 +32,22 @@ const MIME_PRIORITY = [
   "audio/wav",
 ];
 
-export function useMediaCapture({
-  enableVideo = true,
-  enableAudio = true,
-  videoConstraints = {
+const DEFAULT_CONSTRAINTS: MediaStreamConstraints = {
+  video: {
     width: { ideal: 1280 },
     height: { ideal: 720 },
     facingMode: "user",
   },
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
+};
+
+export function useMediaCapture({
+  enableVideo = true,
+  enableAudio = true,
 }: UseMediaCaptureOptions = {}): MediaCaptureState {
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -60,7 +67,9 @@ export function useMediaCapture({
 
   // Detect supported MIME type
   const getSupportedMimeType = useCallback(() => {
-    if (typeof MediaRecorder === "undefined") return "video/webm";
+    if (typeof window === "undefined" || typeof MediaRecorder === "undefined") {
+      return "video/webm";
+    }
     for (const mime of MIME_PRIORITY) {
       if (MediaRecorder.isTypeSupported(mime)) {
         return mime;
@@ -69,47 +78,52 @@ export function useMediaCapture({
     return "";
   }, []);
 
-  // Initialize Media Devices (Camera + Microphone)
-  const initStream = useCallback(async () => {
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Camera/Microphone capture is not supported by your browser.");
-      }
-
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: enableVideo ? videoConstraints : false,
-        audio: enableAudio
-          ? {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            }
-          : false,
-      });
-
-      streamRef.current = mediaStream;
-      setStream(mediaStream);
-
-      const hasVideo = mediaStream.getVideoTracks().length > 0;
-      const hasAudio = mediaStream.getAudioTracks().length > 0;
-      setIsCameraReady(hasVideo);
-      setIsMicReady(hasAudio);
-      setError(null);
-    } catch (err: unknown) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Could not access camera or microphone. Please check browser permissions.";
-      setError(msg);
-      setIsCameraReady(false);
-      setIsMicReady(false);
-    }
-  }, [enableVideo, enableAudio, videoConstraints]);
-
+  // Initialize Media Devices on Mount
   useEffect(() => {
-    void initStream();
+    let mounted = true;
+
+    async function setupStream() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error("Camera/Microphone capture is not supported by your browser.");
+        }
+
+        const constraints: MediaStreamConstraints = {
+          video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
+          audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
+        };
+
+        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+
+        if (!mounted) {
+          mediaStream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        streamRef.current = mediaStream;
+        setStream(mediaStream);
+
+        const hasVideo = mediaStream.getVideoTracks().length > 0;
+        const hasAudio = mediaStream.getAudioTracks().length > 0;
+        setIsCameraReady(hasVideo);
+        setIsMicReady(hasAudio);
+        setError(null);
+      } catch (err: unknown) {
+        if (!mounted) return;
+        const msg =
+          err instanceof Error
+            ? err.message
+            : "Could not access camera or microphone. Please allow permissions in your browser.";
+        setError(msg);
+        setIsCameraReady(false);
+        setIsMicReady(false);
+      }
+    }
+
+    void setupStream();
 
     return () => {
+      mounted = false;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
@@ -117,7 +131,7 @@ export function useMediaCapture({
         clearInterval(timerRef.current);
       }
     };
-  }, [initStream]);
+  }, [enableVideo, enableAudio]);
 
   const startRecording = useCallback(async () => {
     setError(null);
@@ -131,13 +145,19 @@ export function useMediaCapture({
     // Ensure active stream
     let activeStream = streamRef.current;
     if (!activeStream || !activeStream.active) {
-      await initStream();
-      activeStream = streamRef.current;
-    }
-
-    if (!activeStream) {
-      setError("No active media stream found for recording.");
-      return;
+      try {
+        activeStream = await navigator.mediaDevices.getUserMedia({
+          video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
+          audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
+        });
+        streamRef.current = activeStream;
+        setStream(activeStream);
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error ? err.message : "Failed to activate camera/microphone.",
+        );
+        return;
+      }
     }
 
     try {
@@ -168,7 +188,7 @@ export function useMediaCapture({
       );
       setIsRecording(false);
     }
-  }, [recordedUrl, initStream, getSupportedMimeType]);
+  }, [recordedUrl, enableVideo, enableAudio, getSupportedMimeType]);
 
   const stopRecording = useCallback(async (): Promise<Blob | null> => {
     return new Promise((resolve) => {

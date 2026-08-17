@@ -16,42 +16,51 @@ export function AudioVisualizer({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Always draw idle baseline first
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.strokeStyle = "rgba(71, 85, 105, 0.4)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
     if (!stream || !isRecording) {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
       if (audioContextRef.current && audioContextRef.current.state !== "closed") {
         audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
       }
-      // Render idle visual
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.beginPath();
-          ctx.moveTo(0, canvas.height / 2);
-          ctx.lineTo(canvas.width, canvas.height / 2);
-          ctx.strokeStyle = "rgba(71, 85, 105, 0.4)";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
-      }
       return;
     }
 
+    let isMounted = true;
+
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const audioCtx = new AudioCtx();
       audioContextRef.current = audioCtx;
 
+      if (audioCtx.state === "suspended") {
+        void audioCtx.resume();
+      }
+
       const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 128;
-      analyserRef.current = analyser;
+      analyser.fftSize = 64;
+      analyser.smoothingTimeConstant = 0.8;
 
       const source = audioCtx.createMediaStreamSource(stream);
       source.connect(analyser);
@@ -59,36 +68,34 @@ export function AudioVisualizer({
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
 
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
       const draw = () => {
+        if (!isMounted) return;
         animationFrameRef.current = requestAnimationFrame(draw);
         analyser.getByteFrequencyData(dataArray);
 
+        if (!ctx) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const barWidth = (canvas.width / bufferLength) * 2.2;
+        const barWidth = (canvas.width / bufferLength) * 1.5;
         let x = 0;
 
         for (let i = 0; i < bufferLength; i++) {
-          const barHeight = (dataArray[i] / 255) * (canvas.height * 0.85);
+          const rawVal = dataArray[i] || 0;
+          const barHeight = Math.max(4, (rawVal / 255) * (canvas.height * 0.8));
 
-          // Vibrant neon cyan to electric indigo gradient
-          const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+          const gradient = ctx.createLinearGradient(
+            0,
+            canvas.height,
+            0,
+            canvas.height - barHeight,
+          );
           gradient.addColorStop(0, "rgba(6, 182, 212, 0.2)");
           gradient.addColorStop(0.5, "rgba(6, 182, 212, 0.8)");
           gradient.addColorStop(1, "rgba(99, 102, 241, 1)");
 
           ctx.fillStyle = gradient;
-          ctx.shadowBlur = 8;
-          ctx.shadowColor = "rgba(6, 182, 212, 0.5)";
-
-          // Rounded bar rendering
           const y = (canvas.height - barHeight) / 2;
-          ctx.fillRect(x, y, barWidth - 2, Math.max(3, barHeight));
+          ctx.fillRect(x, y, barWidth - 3, barHeight);
 
           x += barWidth;
         }
@@ -100,6 +107,7 @@ export function AudioVisualizer({
     }
 
     return () => {
+      isMounted = false;
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
@@ -111,18 +119,25 @@ export function AudioVisualizer({
   }, [stream, isRecording]);
 
   return (
-    <div className={`relative flex items-center justify-center overflow-hidden rounded-xl bg-slate-950/80 border border-slate-800/80 p-3 shadow-inner ${className}`}>
+    <div
+      className={`relative overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950/70 p-3 shadow-inner ${className}`}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+          Audio Frequency Spectrum (Mic)
+        </span>
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            isRecording ? "bg-cyan-400 animate-ping" : "bg-slate-600"
+          }`}
+        />
+      </div>
       <canvas
         ref={canvasRef}
-        width={400}
-        height={80}
-        className="w-full h-full max-h-20"
+        width={480}
+        height={48}
+        className="h-12 w-full rounded"
       />
-      {!isRecording && (
-        <span className="absolute text-xs font-mono uppercase tracking-wider text-slate-500">
-          Audio Idle — Microphone Standby
-        </span>
-      )}
     </div>
   );
 }

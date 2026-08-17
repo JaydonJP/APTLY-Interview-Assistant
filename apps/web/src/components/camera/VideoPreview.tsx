@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Camera, Mic, Video, VideoOff } from "lucide-react";
+import { useCallback, useRef } from "react";
+import { Camera, Mic, VideoOff } from "lucide-react";
 
 interface VideoPreviewProps {
   stream: MediaStream | null;
@@ -20,13 +20,19 @@ export function VideoPreview({
   isMicReady,
   className = "",
 }: VideoPreviewProps) {
-  const liveVideoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  useEffect(() => {
-    if (liveVideoRef.current && stream && !recordedUrl) {
-      liveVideoRef.current.srcObject = stream;
-    }
-  }, [stream, recordedUrl]);
+  // Callback ref ensures live stream is attached immediately when the DOM node mounts
+  const handleVideoMount = useCallback(
+    (node: HTMLVideoElement | null) => {
+      videoRef.current = node;
+      if (node && stream && !recordedUrl) {
+        node.srcObject = stream;
+        node.play().catch(() => {});
+      }
+    },
+    [stream, recordedUrl],
+  );
 
   return (
     <div
@@ -39,7 +45,7 @@ export function VideoPreview({
         {!recordedUrl ? (
           stream ? (
             <video
-              ref={liveVideoRef}
+              ref={handleVideoMount}
               autoPlay
               muted
               playsInline
