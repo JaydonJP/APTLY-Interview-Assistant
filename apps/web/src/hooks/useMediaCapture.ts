@@ -5,12 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface UseMediaCaptureOptions {
   enableVideo?: boolean;
   enableAudio?: boolean;
+  enableVAD?: boolean;
+  onSpeechStart?: () => void;
+  onSpeechEnd?: () => void;
 }
 
 export interface MediaCaptureState {
   isRecording: boolean;
   isCameraReady: boolean;
   isMicReady: boolean;
+  isSpeaking: boolean;
   audioTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
   videoTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
   micLevelPercent: number;
@@ -52,10 +56,14 @@ const DEFAULT_CONSTRAINTS: MediaStreamConstraints = {
 export function useMediaCapture({
   enableVideo = true,
   enableAudio = true,
+  enableVAD = true,
+  onSpeechStart,
+  onSpeechEnd,
 }: UseMediaCaptureOptions = {}): MediaCaptureState {
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isMicReady, setIsMicReady] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioTrackState, setAudioTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
   const [videoTrackState, setVideoTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
   const [micLevelPercent, setMicLevelPercent] = useState(0);
@@ -76,6 +84,15 @@ export function useMediaCapture({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // VAD Refs
+  const isSpeakingRef = useRef<boolean>(false);
+  const speechStartTimeRef = useRef<number>(0);
+  const silenceStartTimeRef = useRef<number>(0);
+  const onSpeechStartRef = useRef(onSpeechStart);
+  const onSpeechEndRef = useRef(onSpeechEnd);
+  onSpeechStartRef.current = onSpeechStart;
+  onSpeechEndRef.current = onSpeechEnd;
 
   // Detect supported MIME type dynamically
   const getSupportedMimeType = useCallback(() => {
@@ -103,13 +120,15 @@ export function useMediaCapture({
     }
   };
 
-  // Setup Web Audio API volume monitor
+  // Setup Web Audio API volume monitor & Voice Activity Detection (VAD)
   const setupAudioMonitoring = (mediaStream: MediaStream) => {
     try {
       const audioTracks = mediaStream.getAudioTracks();
       if (audioTracks.length === 0) return;
 
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
 
       const audioCtx = new AudioCtx();
@@ -134,6 +153,45 @@ export function useMediaCapture({
         const avg = sum / bufferLength;
         const normalized = Math.min(100, Math.round((avg / 128) * 100));
         setMicLevelPercent(normalized);
+
+        // VAD Logic when recording is active
+        if (enableVAD && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          const now = Date.now();
+          const isVoiceActive = normalized >= 10;
+
+          if (isVoiceActive) {
+            silenceStartTimeRef.current = 0;
+            if (!isSpeakingRef.current) {
+              isSpeakingRef.current = true;
+              speechStartTimeRef.current = now;
+              setIsSpeaking(true);
+              if (onSpeechStartRef.current) {
+                onSpeechStartRef.current();
+              }
+            }
+          } else {
+            // Voice inactive (silence)
+            if (isSpeakingRef.current) {
+              if (!silenceStartTimeRef.current) {
+                silenceStartTimeRef.current = now;
+              } else {
+                const silenceDuration = now - silenceStartTimeRef.current;
+                const speechDuration = now - speechStartTimeRef.current;
+
+                // If candidate spoke for at least 2.5s and silence has lasted > 2.0s, trigger end of turn
+                if (speechDuration >= 2500 && silenceDuration >= 2000) {
+                  isSpeakingRef.current = false;
+                  setIsSpeaking(false);
+                  silenceStartTimeRef.current = 0;
+                  if (onSpeechEndRef.current) {
+                    onSpeechEndRef.current();
+                  }
+                }
+              }
+            }
+          }
+        }
+
         animFrameRef.current = requestAnimationFrame(checkVolume);
       };
 
@@ -161,7 +219,6 @@ export function useMediaCapture({
           };
           mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         } catch (vidErr) {
-          // If video requested but failed (e.g. no camera, camera in use, permission denied), fallback to audio-only
           if (enableVideo && enableAudio) {
             console.warn("Camera access failed, falling back to audio-only capture:", vidErr);
             mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -232,6 +289,10 @@ export function useMediaCapture({
       setRecordedUrl(null);
     }
     chunksRef.current = [];
+    isSpeakingRef.current = false;
+    silenceStartTimeRef.current = 0;
+    speechStartTimeRef.current = 0;
+    setIsSpeaking(false);
 
     // Ensure active stream
     let activeStream = streamRef.current;
@@ -278,61 +339,73 @@ export function useMediaCapture({
       setError(
         err instanceof Error ? err.message : "Failed to start MediaRecorder recording.",
       );
-      setIsRecording(false);
     }
-  }, [recordedUrl, enableVideo, enableAudio, getSupportedMimeType]);
+  }, [enableAudio, enableVideo, getSupportedMimeType, recordedUrl]);
 
-  const stopRecording = useCallback(async (): Promise<Blob | null> => {
+  const stopRecording = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
         setIsRecording(false);
+        setIsSpeaking(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
         resolve(recordedBlob);
         return;
       }
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-
       recorder.onstop = async () => {
-        const finalType = mimeType || "video/webm";
-        const combinedBlob = new Blob(chunksRef.current, { type: finalType });
-        const url = URL.createObjectURL(combinedBlob);
-        const hash = await computeChecksum(combinedBlob);
-
-        setRecordedBlob(combinedBlob);
-        setRecordedUrl(url);
-        setSha256Hash(hash);
         setIsRecording(false);
-        resolve(combinedBlob);
+        setIsSpeaking(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+
+        const type = mimeType || "video/webm";
+        const finalBlob = new Blob(chunksRef.current, { type });
+        setRecordedBlob(finalBlob);
+
+        const url = URL.createObjectURL(finalBlob);
+        setRecordedUrl(url);
+
+        const hash = await computeChecksum(finalBlob);
+        setSha256Hash(hash);
+
+        resolve(finalBlob);
       };
 
       recorder.stop();
     });
-  }, [recordedBlob, mimeType]);
+  }, [mimeType, recordedBlob]);
 
   const resetRecording = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
     }
     chunksRef.current = [];
+    isSpeakingRef.current = false;
+    silenceStartTimeRef.current = 0;
+    speechStartTimeRef.current = 0;
+    setIsRecording(false);
+    setIsSpeaking(false);
     setRecordedBlob(null);
     setRecordedUrl(null);
-    setSha256Hash("");
-    setIsRecording(false);
     setRecordingDuration(0);
-    setError(null);
+    setSha256Hash("");
   }, [recordedUrl]);
 
   return {
     isRecording,
     isCameraReady,
     isMicReady,
+    isSpeaking,
     audioTrackState,
     videoTrackState,
     micLevelPercent,
