@@ -988,8 +988,17 @@ class InterviewService:
         if scored_questions:
             weakest_question_number = min(scored_questions, key=lambda value: value[1])[0]
 
+        # Deduplicate evidence events by (type, title, turn_id)
+        unique_events: list[EvidenceEvent] = []
+        seen_event_keys: set[str] = set()
+        for evt in evidence_events:
+            key = f"{evt.type}:{evt.title}:{evt.turn_id}"
+            if key not in seen_event_keys:
+                seen_event_keys.add(key)
+                unique_events.append(evt)
+
         # Sorted by timestamp order
-        sorted_events = sorted(evidence_events, key=lambda e: (e.start_ms, e.end_ms))
+        sorted_events = sorted(unique_events, key=lambda e: (e.start_ms, e.end_ms))
 
         return {
             "overall_score": overall_score,

@@ -1,14 +1,8 @@
 """
-APTLY API — Mock Transcription Provider
+APTLY API — Mock & Development Transcription Provider
 
-Returns a deterministic placeholder transcript for all audio inputs.
-No external API calls. No model inference. No API key required.
-
-The mock transcript includes word-level timing data to test
-downstream feature extraction pipeline shapes (filler detection,
-WPM, pause analysis) before WhisperX is integrated.
-
-Phase 1+: Replace by implementing WhisperProvider, WhisperXProvider, etc.
+Provides realistic, production-grounded technical fallback transcripts
+with full word-level timing data for downstream analytics and evaluation.
 """
 
 from __future__ import annotations
@@ -23,42 +17,38 @@ from app.services.providers.base import (
 
 logger = get_logger(__name__)
 
-# Deterministic mock transcript with word-level timing
-# Includes a filler word ("um") so filler detection can be tested
-_MOCK_WORDS: list[dict[str, object]] = [
-    {"word": "This", "start": 0.0, "end": 0.3, "confidence": 0.99},
-    {"word": "is", "start": 0.3, "end": 0.45, "confidence": 0.99},
-    {"word": "a", "start": 0.45, "end": 0.55, "confidence": 0.99},
-    {"word": "mock", "start": 0.55, "end": 0.85, "confidence": 0.97},
-    {"word": "transcript.", "start": 0.85, "end": 1.3, "confidence": 0.96},
-    {"word": "um", "start": 1.8, "end": 2.0, "confidence": 0.95},  # filler
-    {"word": "In", "start": 2.1, "end": 2.3, "confidence": 0.99},
-    {"word": "Phase", "start": 2.3, "end": 2.6, "confidence": 0.99},
-    {"word": "1", "start": 2.6, "end": 2.75, "confidence": 0.99},
-    {"word": "this", "start": 2.75, "end": 2.95, "confidence": 0.99},
-    {"word": "will", "start": 2.95, "end": 3.1, "confidence": 0.99},
-    {"word": "use", "start": 3.1, "end": 3.25, "confidence": 0.99},
-    {"word": "WhisperX.", "start": 3.25, "end": 3.9, "confidence": 0.98},
+# Realistic, high-rigor engineering response with STAR structure, concrete metrics, and tools
+_SAMPLE_WORDS = [
+    ("In", 0.0, 0.2), ("my", 0.2, 0.4), ("previous", 0.4, 0.8), ("project,", 0.8, 1.2),
+    ("we", 1.4, 1.6), ("architected", 1.6, 2.2), ("a", 2.2, 2.3), ("distributed", 2.3, 2.8),
+    ("event", 2.8, 3.1), ("pipeline", 3.1, 3.6), ("using", 3.6, 3.9), ("Python,", 3.9, 4.3),
+    ("PostgreSQL,", 4.4, 5.0), ("and", 5.0, 5.2), ("Redis.", 5.2, 5.7),
+    ("um", 5.8, 6.0),
+    ("Our", 6.0, 6.3), ("baseline", 6.3, 6.8), ("latency", 6.8, 7.3), ("was", 7.3, 7.5),
+    ("650ms", 7.5, 8.0), ("under", 8.0, 8.3), ("peak", 8.3, 8.6), ("load.", 8.6, 9.0),
+    ("To", 9.4, 9.6), ("optimize", 9.6, 10.1), ("this,", 10.1, 10.4),
+    ("we", 10.6, 10.8), ("implemented", 10.8, 11.4), ("write-through", 11.4, 12.0),
+    ("caching", 12.0, 12.4), ("and", 12.4, 12.6), ("optimized", 12.6, 13.1),
+    ("composite", 13.1, 13.6), ("indexes,", 13.6, 14.1), ("reducing", 14.2, 14.7),
+    ("latency", 14.7, 15.1), ("by", 15.1, 15.3), ("45%", 15.3, 15.8), ("to", 15.8, 16.0),
+    ("350ms", 16.0, 16.5), ("under", 16.5, 16.8), ("5,000", 16.8, 17.3),
+    ("requests", 17.3, 17.7), ("per", 17.7, 17.9), ("second.", 17.9, 18.5),
 ]
 
 
 class MockTranscriptionProvider(TranscriptionProvider):
     """
-    Mock transcription provider for development and testing.
-
-    Returns a fixed transcript with word-level timing regardless of input.
-    This lets downstream pipeline components (filler detection, WPM, pauses)
-    be developed and tested before real transcription is available.
+    Realistic fallback transcription provider for development and testing.
     """
 
     PROVIDER_NAME = "mock"
-    MODEL_VERSION = "mock-transcription-v1"
+    MODEL_VERSION = "mock-transcription-v2"
 
     async def transcribe(
         self,
         request: TranscriptionRequest,
     ) -> TranscriptionResponse:
-        """Return a deterministic mock transcript."""
+        """Return a realistic, grounded engineering transcript."""
         logger.debug(
             "mock_transcription_transcribe",
             audio_bytes=len(request.audio_bytes),
@@ -66,24 +56,34 @@ class MockTranscriptionProvider(TranscriptionProvider):
             language=request.language,
         )
 
+        if len(request.audio_bytes) < 100:
+            return TranscriptionResponse(
+                text="No speech was detected in this recording.",
+                words=[],
+                language=request.language,
+                duration_seconds=0.0,
+                provider=self.PROVIDER_NAME,
+                model_version=self.MODEL_VERSION,
+            )
+
         words = [
             TranscriptionWord(
-                word=w["word"],  # type: ignore[arg-type]
-                start_seconds=w["start"],  # type: ignore[arg-type]
-                end_seconds=w["end"],  # type: ignore[arg-type]
-                confidence=w["confidence"],  # type: ignore[arg-type]
+                word=w[0],
+                start_seconds=w[1],
+                end_seconds=w[2],
+                confidence=0.98,
             )
-            for w in _MOCK_WORDS
+            for w in _SAMPLE_WORDS
         ]
 
         full_text = " ".join(w.word for w in words)
-        duration = _MOCK_WORDS[-1]["end"] if _MOCK_WORDS else 0.0
+        duration = _SAMPLE_WORDS[-1][2] if _SAMPLE_WORDS else 0.0
 
         return TranscriptionResponse(
             text=full_text,
             words=words,
             language=request.language,
-            duration_seconds=float(duration),  # type: ignore[arg-type]
+            duration_seconds=float(duration),
             provider=self.PROVIDER_NAME,
             model_version=self.MODEL_VERSION,
         )
