@@ -53,8 +53,15 @@ class Answer(UUIDMixin, TimestampMixin, Base):
 
     # Object storage reference
     audio_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    normalized_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     audio_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Phase 3 Recording & Processing Traceability
+    recording_session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    media_asset_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    processing_status: Mapped[str] = mapped_column(String(50), default="created", nullable=False)
+    transcription_status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
 
     # Relationships
     interview: Mapped[Interview] = relationship(

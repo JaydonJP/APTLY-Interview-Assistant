@@ -28,7 +28,9 @@ from app.models.metrics import SpeechMetrics
 from app.models.question import Question
 from app.models.transcript import Transcript
 from app.schemas.content_intelligence import ContentAnalysisInput
+from app.services.adaptive_interview.engine import GeminiAdaptiveEngine
 from app.services.content_intelligence.service import ContentAnalysisService
+from app.services.media_normalizer import MediaNormalizerService
 from app.services.providers.base import (
     LLMProvider,
     TranscriptionProvider,
@@ -95,6 +97,8 @@ class InterviewService:
         self.question_generator = QuestionGeneratorService(llm_provider)
         self.speech_metrics_service = SpeechMetricsService()
         self.content_analysis_service = ContentAnalysisService(llm_provider)
+        self.media_normalizer = MediaNormalizerService()
+        self.adaptive_engine = GeminiAdaptiveEngine(llm_provider=llm_provider)
 
     def transition_state(self, interview: Interview, new_status: str) -> None:
         """Enforce strict state machine transitions."""
@@ -282,7 +286,8 @@ class InterviewService:
                 f"Interview '{interview_id}' not found.", code="INTERVIEW_NOT_FOUND"
             )
 
-        # 1. Upload audio to storage
+        # 1. Upload original audio/video to storage
+        sha256_hash = self.media_normalizer.compute_sha256(audio_data)
         upload_req = UploadRequest(
             data=audio_data,
             content_type=content_type,
@@ -293,15 +298,38 @@ class InterviewService:
         )
         upload_res = await self.storage_provider.upload(upload_req)
 
-        # 2. Update answer metadata
+        # 2. Extract & Normalize Audio via FFmpeg to 16kHz Mono WAV
+        normalized_wav_bytes = audio_data
+        try:
+            wav_bytes, media_info = self.media_normalizer.normalize_bytes(audio_data, extension="webm")
+            normalized_wav_bytes = wav_bytes
+
+            # Upload normalized WAV artifact to Supabase Storage
+            wav_upload_req = UploadRequest(
+                data=normalized_wav_bytes,
+                content_type="audio/wav",
+                data_class="raw_audio",
+                interview_id=str(interview_id),
+                answer_id=str(answer_id),
+                extension="wav",
+            )
+            wav_upload_res = await self.storage_provider.upload(wav_upload_req)
+            answer.normalized_storage_key = wav_upload_res.storage_key
+            if media_info.get("duration_seconds"):
+                duration_seconds = float(media_info["duration_seconds"])
+        except Exception as norm_err:
+            logger.warning("audio_normalization_skipped_or_failed", error=str(norm_err))
+
+        # 3. Update answer metadata
         answer.audio_storage_key = upload_res.storage_key
         answer.audio_size_bytes = upload_res.size_bytes
-        answer.audio_checksum_sha256 = upload_res.metadata.checksum_sha256
+        answer.audio_checksum_sha256 = sha256_hash
         answer.duration_seconds = duration_seconds or max(
             3.0, round(len(audio_data) / 16000.0, 1)
         )
         answer.ended_at = datetime.now(UTC)
         answer.status = "uploaded"
+        answer.processing_status = "processing"
 
         if interview.status in ("answering", "question_active"):
             self.transition_state(interview, "answer_submitted")
@@ -315,10 +343,12 @@ class InterviewService:
             answer_id=str(answer_id),
             size_bytes=len(audio_data),
             storage_key=answer.audio_storage_key,
+            normalized_key=answer.normalized_storage_key,
+            sha256=sha256_hash,
         )
 
-        # 3. Trigger async transcription and metrics computation
-        await self._process_answer_pipeline(answer, audio_data, content_type)
+        # 4. Trigger async transcription, metrics computation, and adaptive follow-up
+        await self._process_answer_pipeline(answer, normalized_wav_bytes, "audio/wav")
 
         return answer
 
@@ -330,13 +360,14 @@ class InterviewService:
     ) -> None:
         """
         Non-blocking speech processing pipeline:
-        Transcribe audio -> Compute speech metrics -> Persist Transcript & Metrics.
+        Transcribe normalized audio -> Compute speech metrics -> Content Intelligence -> Adaptive follow-up.
         """
         logger.info("transcription_started", answer_id=str(answer.id))
         answer.status = "processing"
+        answer.transcription_status = "in_progress"
         await self.db.commit()
 
-        # Step A: Transcribe via provider
+        # Step A: Transcribe via provider (receives 16kHz mono WAV)
         transcription_res = await self.transcription_provider.transcribe(
             TranscriptionRequest(
                 audio_bytes=audio_data,
@@ -368,6 +399,7 @@ class InterviewService:
             schema_version="1.0",
         )
         self.db.add(transcript)
+        answer.transcription_status = "completed"
 
         # Step B: Compute deterministic speech metrics
         metrics_computed = self.speech_metrics_service.compute(
@@ -391,6 +423,7 @@ class InterviewService:
         self.db.add(speech_metrics)
 
         # Step C: Phase 2 Content Intelligence Analysis
+        content_metrics_record = None
         try:
             question = await self.db.get(Question, answer.question_id)
             interview = await self.db.get(Interview, answer.interview_id)
@@ -412,26 +445,48 @@ class InterviewService:
             )
 
             content_result = await self.content_analysis_service.analyze_answer(analysis_input)
-            await self.content_analysis_service.persist_content_metrics(
+            content_metrics_record = await self.content_analysis_service.persist_content_metrics(
                 db=self.db,
-                answer_id=str(answer.id),
+                answer_id=answer.id,
                 result=content_result,
-                provider=getattr(self.llm_provider, "PROVIDER_NAME", "mock"),
-                model=getattr(self.llm_provider, "MODEL_NAME", "mock-llm-v2"),
+                provider=getattr(self.llm_provider, "PROVIDER_NAME", "gemini"),
+                model=getattr(self.llm_provider, "MODEL_NAME", "gemini-2.5-flash"),
             )
             logger.info(
                 "content_intelligence_completed",
                 answer_id=str(answer.id),
                 score=content_result.overall_content_score,
             )
+
+            # Step D: Phase 3 Adaptive Follow-Up Question Generation
+            if question:
+                followup = await self.adaptive_engine.maybe_generate_followup(
+                    db=self.db,
+                    parent_question=question,
+                    candidate_transcript=transcription_res.text,
+                    content_metrics=content_metrics_record,
+                    role_context=(
+                        {"role_title": role_profile.role_title, "domain": role_profile.domain}
+                        if role_profile
+                        else None
+                    ),
+                )
+                if followup:
+                    logger.info(
+                        "adaptive_followup_ready_for_turn",
+                        parent_q=str(question.id),
+                        followup_q=str(followup.id),
+                        text=followup.question_text,
+                    )
         except Exception as content_err:
             logger.error(
-                "content_intelligence_failed",
+                "content_intelligence_or_adaptive_failed",
                 answer_id=str(answer.id),
                 error=str(content_err),
             )
 
         answer.status = "transcribed"
+        answer.processing_status = "processed"
         await self.db.commit()
         await self.db.refresh(answer)
 

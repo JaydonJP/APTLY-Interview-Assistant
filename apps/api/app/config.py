@@ -85,13 +85,16 @@ class Settings(BaseSettings):
         description="Supabase anonymous key for public client operations",
     )
 
-    # ── LLM Provider ──────────────────────────────────────────
-    llm_provider: Literal["mock", "openai", "anthropic", "google"] = "mock"
+    # ── LLM Provider (Google Gemini Pure Engine) ──────────────
+    llm_provider: Literal["mock", "gemini"] = "mock"
+    gemini_api_key: str = Field(default="", description="Google Gemini API key")
     llm_api_key: str = ""
-    llm_model: str = ""
+    llm_model: str = "gemini-2.5-flash"
+    llm_timeout_seconds: float = 30.0
+    llm_temperature: float = 0.1
 
     # ── TTS Provider ──────────────────────────────────────────
-    tts_provider: Literal["mock", "elevenlabs", "openai"] = "mock"
+    tts_provider: Literal["mock", "elevenlabs"] = "mock"
     tts_api_key: str = ""
 
     # ── Transcription Provider ────────────────────────────────

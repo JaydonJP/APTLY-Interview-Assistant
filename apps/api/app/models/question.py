@@ -39,6 +39,21 @@ class Question(UUIDMixin, TimestampMixin, Base):
     expected_topics: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     prompt_version: Mapped[str] = mapped_column(String(50), nullable=False, default="v1")
 
+    # Phase 3 Question Graph & Adaptive Tracking
+    parent_question_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    root_question_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    question_source: Mapped[str] = mapped_column(String(50), nullable=False, default="initial")
+    follow_up_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    target_competency: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+
     # Relationships
     interview: Mapped[Interview] = relationship(
         "Interview", back_populates="questions", lazy="selectin"

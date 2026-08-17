@@ -53,8 +53,8 @@ def test_settings_not_mock_when_llm_real() -> None:
     settings = Settings(
         _env_file=None,  # type: ignore[call-arg]
         secret_key="test-secret",
-        llm_provider="openai",
-        llm_api_key="sk-fake",
+        llm_provider="gemini",
+        gemini_api_key="fake-gemini-key",
         tts_provider="mock",
         transcription_provider="mock",
     )

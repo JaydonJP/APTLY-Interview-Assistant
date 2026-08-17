@@ -140,28 +140,28 @@ async def get_storage(
     )
 
 
-# ── LLM Provider ─────────────────────────────────────────────────────────────
+# ── LLM Provider (Google Gemini Pure Engine) ─────────────────────────────────
 
 
 @lru_cache
 def _get_llm_provider_instance(
     provider: str,
     api_key: str = "",
-    model: str = "gpt-4o-mini",
+    model: str = "gemini-2.5-flash",
 ) -> LLMProvider:
     """Create and cache the LLM provider (singleton)."""
     if provider == "mock":
         logger.info("llm_provider_init", provider="mock")
         return MockLLMProvider()
-    if provider in ("openai", "azure_openai", "anthropic", "google"):
-        from app.services.providers.openai_llm import OpenAILLMProvider
+    if provider in ("gemini", "google"):
+        from app.services.providers.gemini_llm import GeminiLLMProvider
 
-        logger.info("llm_provider_init", provider="openai", model=model)
-        return OpenAILLMProvider(
+        logger.info("llm_provider_init", provider="gemini", model=model)
+        return GeminiLLMProvider(
             api_key=api_key,
-            model=model or "gpt-4o-mini",
+            model=model or "gemini-2.5-flash",
         )
-    msg = f"LLM provider '{provider}' is not yet implemented"
+    msg = f"LLM provider '{provider}' is not supported. Use 'gemini' or 'mock'."
     raise NotImplementedError(msg)
 
 
@@ -169,9 +169,10 @@ async def get_llm_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> LLMProvider:
     """FastAPI dependency: returns the configured LLM provider."""
+    key = settings.gemini_api_key or settings.llm_api_key
     return _get_llm_provider_instance(
         settings.llm_provider,
-        settings.llm_api_key,
+        key,
         settings.llm_model,
     )
 

@@ -11,9 +11,13 @@ export interface MediaCaptureState {
   isRecording: boolean;
   isCameraReady: boolean;
   isMicReady: boolean;
+  audioTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
+  videoTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
+  micLevelPercent: number;
   recordingDuration: number;
   recordedBlob: Blob | null;
   recordedUrl: string | null;
+  sha256Hash: string;
   stream: MediaStream | null;
   mimeType: string;
   error: string | null;
@@ -52,9 +56,13 @@ export function useMediaCapture({
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isMicReady, setIsMicReady] = useState(false);
+  const [audioTrackState, setAudioTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
+  const [videoTrackState, setVideoTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
+  const [micLevelPercent, setMicLevelPercent] = useState(0);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
+  const [sha256Hash, setSha256Hash] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mimeType, setMimeType] = useState<string>("video/webm");
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +73,11 @@ export function useMediaCapture({
   const startTimeRef = useRef<number>(0);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Detect supported MIME type
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  // Detect supported MIME type dynamically
   const getSupportedMimeType = useCallback(() => {
     if (typeof window === "undefined" || typeof MediaRecorder === "undefined") {
       return "video/webm";
@@ -77,6 +89,59 @@ export function useMediaCapture({
     }
     return "";
   }, []);
+
+  // Compute SHA-256 Checksum in browser
+  const computeChecksum = async (blob: Blob): Promise<string> => {
+    try {
+      const buffer = await blob.arrayBuffer();
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      return Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    } catch {
+      return "";
+    }
+  };
+
+  // Setup Web Audio API volume monitor
+  const setupAudioMonitoring = (mediaStream: MediaStream) => {
+    try {
+      const audioTracks = mediaStream.getAudioTracks();
+      if (audioTracks.length === 0) return;
+
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const audioCtx = new AudioCtx();
+      audioContextRef.current = audioCtx;
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+
+      const source = audioCtx.createMediaStreamSource(mediaStream);
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const checkVolume = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / bufferLength;
+        const normalized = Math.min(100, Math.round((avg / 128) * 100));
+        setMicLevelPercent(normalized);
+        animFrameRef.current = requestAnimationFrame(checkVolume);
+      };
+
+      checkVolume();
+    } catch {
+      // Audio context might fail in background tabs; gracefully ignore
+    }
+  };
 
   // Initialize Media Devices on Mount
   useEffect(() => {
@@ -103,10 +168,16 @@ export function useMediaCapture({
         streamRef.current = mediaStream;
         setStream(mediaStream);
 
-        const hasVideo = mediaStream.getVideoTracks().length > 0;
-        const hasAudio = mediaStream.getAudioTracks().length > 0;
-        setIsCameraReady(hasVideo);
-        setIsMicReady(hasAudio);
+        const vTracks = mediaStream.getVideoTracks();
+        const aTracks = mediaStream.getAudioTracks();
+
+        setIsCameraReady(vTracks.length > 0);
+        setIsMicReady(aTracks.length > 0);
+
+        setVideoTrackState(vTracks.length > 0 ? (vTracks[0].readyState === "live" ? "LIVE" : "ENDED") : "NONE");
+        setAudioTrackState(aTracks.length > 0 ? (aTracks[0].readyState === "live" ? "LIVE" : "ENDED") : "NONE");
+
+        setupAudioMonitoring(mediaStream);
         setError(null);
       } catch (err: unknown) {
         if (!mounted) return;
@@ -124,6 +195,12 @@ export function useMediaCapture({
 
     return () => {
       mounted = false;
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        void audioContextRef.current.close();
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
@@ -136,6 +213,7 @@ export function useMediaCapture({
   const startRecording = useCallback(async () => {
     setError(null);
     setRecordedBlob(null);
+    setSha256Hash("");
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
       setRecordedUrl(null);
@@ -152,6 +230,7 @@ export function useMediaCapture({
         });
         streamRef.current = activeStream;
         setStream(activeStream);
+        setupAudioMonitoring(activeStream);
       } catch (err: unknown) {
         setError(
           err instanceof Error ? err.message : "Failed to activate camera/microphone.",
@@ -174,7 +253,7 @@ export function useMediaCapture({
         }
       };
 
-      recorder.start(250); // Collect slices every 250ms
+      recorder.start(1000); // Timeslice 1000ms
       setIsRecording(true);
       startTimeRef.current = Date.now();
       setRecordingDuration(0);
@@ -204,13 +283,15 @@ export function useMediaCapture({
         timerRef.current = null;
       }
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const finalType = mimeType || "video/webm";
         const combinedBlob = new Blob(chunksRef.current, { type: finalType });
         const url = URL.createObjectURL(combinedBlob);
+        const hash = await computeChecksum(combinedBlob);
 
         setRecordedBlob(combinedBlob);
         setRecordedUrl(url);
+        setSha256Hash(hash);
         setIsRecording(false);
         resolve(combinedBlob);
       };
@@ -229,6 +310,7 @@ export function useMediaCapture({
     chunksRef.current = [];
     setRecordedBlob(null);
     setRecordedUrl(null);
+    setSha256Hash("");
     setIsRecording(false);
     setRecordingDuration(0);
     setError(null);
@@ -238,9 +320,13 @@ export function useMediaCapture({
     isRecording,
     isCameraReady,
     isMicReady,
+    audioTrackState,
+    videoTrackState,
+    micLevelPercent,
     recordingDuration,
     recordedBlob,
     recordedUrl,
+    sha256Hash,
     stream,
     mimeType,
     error,

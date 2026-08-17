@@ -73,6 +73,11 @@ export interface Question {
   question_text: string;
   expected_topics: string[];
   prompt_version: string;
+  parent_question_id?: string | null;
+  root_question_id?: string | null;
+  question_source?: "initial" | "follow_up" | string;
+  follow_up_depth?: number;
+  target_competency?: string;
 }
 
 export interface FillerOccurrence {
