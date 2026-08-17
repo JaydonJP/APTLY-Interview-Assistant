@@ -65,6 +65,20 @@ class Settings(BaseSettings):
     storage_access_key: str = ""
     storage_secret_key: str = ""
 
+    # ── Supabase ──────────────────────────────────────────────
+    supabase_url: str = Field(
+        default="",
+        description="Supabase project URL e.g. https://[project-ref].supabase.co",
+    )
+    supabase_service_role_key: str = Field(
+        default="",
+        description="Supabase service role secret (kept server-side only)",
+    )
+    supabase_anon_key: str = Field(
+        default="",
+        description="Supabase anonymous key for public client operations",
+    )
+
     # ── LLM Provider ──────────────────────────────────────────
     llm_provider: Literal["mock", "openai", "anthropic", "google"] = "mock"
     llm_api_key: str = ""
@@ -103,6 +117,17 @@ class Settings(BaseSettings):
             and self.tts_provider == "mock"
             and self.transcription_provider == "mock"
         )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        """Normalize database URL for asyncpg if raw postgres:// or postgresql:// is provided."""
+        if isinstance(v, str):
+            if v.startswith("postgres://"):
+                return v.replace("postgres://", "postgresql+asyncpg://", 1)
+            if v.startswith("postgresql://") and not v.startswith("postgresql+"):
+                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
     @field_validator("cors_origins", mode="before")
     @classmethod

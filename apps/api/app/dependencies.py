@@ -99,12 +99,24 @@ async def get_db(
 def _get_storage_provider_instance(
     provider: str,
     endpoint: str,
+    supabase_url: str = "",
+    supabase_service_role_key: str = "",
+    bucket_name: str = "aptly-media",
 ) -> StorageProvider:
     """Create and cache the storage provider (singleton per configuration)."""
     if provider == "local":
         logger.info("storage_provider_init", provider="local", endpoint=endpoint)
         return LocalStorageProvider(root_dir=endpoint)
-    # Phase 1+: add s3, supabase, r2 implementations here
+    if provider == "supabase":
+        from app.services.storage.supabase import SupabaseStorageProvider
+
+        logger.info("storage_provider_init", provider="supabase", bucket=bucket_name)
+        return SupabaseStorageProvider(
+            supabase_url=supabase_url,
+            service_role_key=supabase_service_role_key,
+            bucket_name=bucket_name,
+        )
+    # Future providers: s3, r2
     msg = f"Storage provider '{provider}' is not yet implemented"
     raise NotImplementedError(msg)
 
@@ -116,6 +128,9 @@ async def get_storage(
     return _get_storage_provider_instance(
         settings.storage_provider,
         settings.storage_endpoint,
+        settings.supabase_url,
+        settings.supabase_service_role_key,
+        settings.storage_bucket,
     )
 
 
