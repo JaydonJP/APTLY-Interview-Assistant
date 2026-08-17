@@ -19,6 +19,7 @@ from app.models.content_metrics import ContentMetrics
 from app.models.question import Question
 from app.services.adaptive_interview.followup_decision import (
     FollowUpDecisionService,
+    FollowUpReason,
 )
 from app.services.providers.base import LLMGenerateRequest, LLMProvider
 
@@ -36,18 +37,23 @@ CRITICAL RULES:
 """
 
 
+from app.services.session_memory.service import SessionMemoryService
+
+
 class GeminiAdaptiveEngine:
     """
-    Orchestrates adaptive follow-up evaluation and generation with Google Gemini.
+    Orchestrates adaptive follow-up evaluation and generation with Google Gemini and Session Memory.
     """
 
     def __init__(
         self,
         llm_provider: LLMProvider,
         decision_service: FollowUpDecisionService | None = None,
+        memory_service: SessionMemoryService | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.decision_service = decision_service or FollowUpDecisionService()
+        self.memory_service = memory_service or SessionMemoryService()
 
     async def maybe_generate_followup(
         self,
@@ -58,25 +64,58 @@ class GeminiAdaptiveEngine:
         role_context: dict[str, Any] | None = None,
     ) -> Question | None:
         """
-        Evaluate if a follow-up is warranted and generate a grounded Question entity.
+        Evaluate if a follow-up is warranted and generate a grounded Question entity with session memory.
         """
+        # 1. Extract and persist current turn memories
+        current_memories = self.memory_service.extract_memories(
+            interview_id=str(parent_question.interview_id),
+            question_id=str(parent_question.id),
+            turn_number=parent_question.sequence_number,
+            transcript=candidate_transcript,
+            content_metrics=content_metrics,
+        )
+        await self.memory_service.persist_memories(db, current_memories)
+
+        # 2. Retrieve relevant historical session memory
+        relevant_memories = await self.memory_service.get_relevant_memories(
+            db=db,
+            interview_id=parent_question.interview_id,
+            current_transcript=candidate_transcript,
+            limit=4,
+        )
+
+        # 3. Check for cross-turn contradictions
+        contradictions = self.memory_service.detect_contradictions(
+            current_memories=current_memories,
+            historical_memories=relevant_memories,
+        )
+
         decision = self.decision_service.evaluate_decision(
             question=parent_question,
             transcript=candidate_transcript,
             content_metrics=content_metrics,
         )
 
+        # If contradiction found, override decision to probe consistency
+        if contradictions:
+            top_contra = contradictions[0]
+            decision.should_follow_up = True
+            decision.reason = FollowUpReason.CLAIM_REQUIRES_CLARIFICATION
+            decision.justification = f"Consistency check: {top_contra.suggested_probe}"
+            decision.context_quote = top_contra.second_statement
+
         if not decision.should_follow_up:
             logger.info(
                 "adaptive_followup_skipped",
                 question_id=str(parent_question.id),
-                reason=decision.reason.value,
+                reason=str(decision.reason),
                 justification=decision.justification,
             )
             return None
 
         role_title = role_context.get("role_title", "Software Engineer") if role_context else "Software Engineer"
         domain = role_context.get("domain", "Engineering") if role_context else "Engineering"
+        memory_context = self.memory_service.format_memory_for_prompt(relevant_memories)
 
         prompt = f"""### INTERVIEW CONTEXT
 - Target Role: {role_title} ({domain})
@@ -85,6 +124,8 @@ class GeminiAdaptiveEngine:
 
 ### CANDIDATE'S ACTUAL SPOKEN ANSWER
 \"\"\"{candidate_transcript}\"\"\"
+
+{memory_context}
 
 ### FOLLOW-UP OBJECTIVE
 - Action: {str(decision.followup_action)}
@@ -98,17 +139,20 @@ Generate exactly ONE grounded follow-up question probing this point. Reference t
 
         follow_up_text: str | None = None
 
-        try:
-            req = LLMGenerateRequest(
-                prompt=prompt,
-                system_prompt=ADAPTIVE_INTERVIEWER_SYSTEM_PROMPT,
-                temperature=0.3,
-                max_tokens=120,
-            )
-            resp = await self.llm_provider.generate_text(req)
-            follow_up_text = resp.text.strip().replace('"', '')
-        except Exception as exc:
-            logger.warning("adaptive_followup_llm_failed_falling_back", error=str(exc))
+        if contradictions:
+            follow_up_text = contradictions[0].suggested_probe
+        else:
+            try:
+                req = LLMGenerateRequest(
+                    prompt=prompt,
+                    system_prompt=ADAPTIVE_INTERVIEWER_SYSTEM_PROMPT,
+                    temperature=0.3,
+                    max_tokens=120,
+                )
+                resp = await self.llm_provider.generate_text(req)
+                follow_up_text = resp.text.strip().replace('"', '')
+            except Exception as exc:
+                logger.warning("adaptive_followup_llm_failed_falling_back", error=str(exc))
             # Resilient fallback: Synthesize grounded deterministic follow-up from quote & action
             if decision.context_quote:
                 action_str = str(decision.followup_action)
