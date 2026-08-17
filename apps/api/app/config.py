@@ -105,6 +105,24 @@ class Settings(BaseSettings):
     whisperx_compute_type: str = "auto"
     whisperx_language: str = "en"
 
+    # ── Gemini Live Realtime Engine ───────────────────────────
+    feature_gemini_live_interview: bool = Field(
+        default=False,
+        description="Enable real-time Gemini Live WebSocket interview mode",
+    )
+    gemini_live_model: str = Field(
+        default="gemini-2.0-flash-exp",
+        description="Google Gemini Live model identifier",
+    )
+    gemini_live_language_code: str = Field(
+        default="en-US",
+        description="Default spoken language code for Gemini Live session",
+    )
+    gemini_live_token_ttl_seconds: int = Field(
+        default=600,
+        description="TTL for server-minted short-lived ephemeral client tokens",
+    )
+
     # ── Feature Flags ─────────────────────────────────────────
     feature_realtime_interview: bool = False
     feature_audio_analysis: bool = False

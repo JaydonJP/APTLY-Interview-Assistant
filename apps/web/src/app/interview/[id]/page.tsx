@@ -40,6 +40,8 @@ type ConversationalState =
   | "ADVANCING"
   | "ENDING";
 
+import { useGeminiLiveSession } from "@/hooks/useGeminiLiveSession";
+
 export default function LiveInterviewRoomPage() {
   const params = useParams<{ id: string }>();
   const interviewId = params.id;
@@ -61,6 +63,22 @@ export default function LiveInterviewRoomPage() {
   // Consent Modal State
   const [hasConsent, setHasConsent] = useState<boolean | null>(null);
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+
+  // Gemini Live Session Hook
+  const {
+    status: liveStatus,
+    isFallback,
+    fallbackReason,
+    partialInputTranscript,
+    partialOutputTranscript,
+    liveWpm,
+    isMuted,
+    toggleMute,
+    interruptInterviewer,
+  } = useGeminiLiveSession({
+    interviewId,
+    enabled: Boolean(interviewId),
+  });
 
   // WebSocket hook for live session events & heartbeat
   const { status: wsStatus, sendEvent } = useInterviewWebSocket({
@@ -483,13 +501,15 @@ export default function LiveInterviewRoomPage() {
 
           <div
             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-mono ${
-              wsStatus === "connected"
+              liveStatus === "Interviewer speaking" || liveStatus === "Listening" || liveStatus === "Candidate speaking"
                 ? "border-emerald-500/30 bg-emerald-950/30 text-emerald-300"
+                : liveStatus === "Connecting" || liveStatus === "Processing turn"
+                ? "border-violet-500/30 bg-violet-950/30 text-violet-300"
                 : "border-amber-500/30 bg-amber-950/30 text-amber-300"
             }`}
           >
             <Radio className="h-3 w-3 animate-pulse" />
-            <span>{wsStatus === "connected" ? "Live" : "Reconnecting"}</span>
+            <span>{isFallback ? "Offline fallback" : liveStatus}</span>
           </div>
         </div>
       </div>
