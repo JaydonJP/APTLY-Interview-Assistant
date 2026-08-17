@@ -38,7 +38,11 @@ import type { InterviewTwinProfile, SessionTrendPoint } from "@/types/twin";
 type ChartMetric = "overall" | "content" | "delivery" | "evidence";
 type ChartView = "curve" | "bars";
 
+import { useAuth } from "@/components/auth/AuthContext";
+import { LockKeyhole, LogIn } from "lucide-react";
+
 export function ProgressDashboard() {
+  const { user, openAuthModal } = useAuth();
   const [interviews, setInterviews] = useState<InterviewDetail[]>([]);
   const [twin, setTwin] = useState<InterviewTwinProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,6 +53,13 @@ export function ProgressDashboard() {
 
   useEffect(() => {
     async function loadProgressData() {
+      if (!user) {
+        setInterviews([]);
+        setTwin(null);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         setIsLoading(true);
         const [interviewsRes, twinRes] = await Promise.allSettled([
@@ -70,7 +81,7 @@ export function ProgressDashboard() {
     }
 
     loadProgressData();
-  }, []);
+  }, [user]);
 
   // Compute aggregated stats
   const completedSessions = useMemo(() => {
@@ -354,60 +365,84 @@ export function ProgressDashboard() {
           </div>
         </div>
 
-        {/* Level & XP Master Bar */}
-        <div className="mt-8 rounded-2xl border border-white/8 bg-black/30 p-5 backdrop-blur-xl">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-400/40 bg-gradient-to-br from-violet-600/30 to-indigo-600/30 text-violet-200 shadow-inner">
-                <Award className="h-6 w-6" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-violet-300">
-                    Level {currentLevel}
-                  </span>
-                  <span className="text-slate-500">•</span>
-                  <span className="text-xs font-semibold text-slate-300">
-                    {levelNames[currentLevel - 1] || "Senior Engineer"}
+        {!user ? (
+          <div className="mt-8 rounded-3xl border border-violet-500/20 bg-gradient-to-br from-[#121824] via-[#0d121c] to-[#181126] p-8 sm:p-12 text-center shadow-2xl backdrop-blur-xl">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-violet-500/20 text-violet-300 border border-violet-400/30">
+              <LockKeyhole className="h-8 w-8" />
+            </div>
+            <h2 className="mt-5 text-2xl font-bold text-white sm:text-3xl">
+              Sign in to track your private progress & analytics
+            </h2>
+            <p className="mt-3 max-w-xl mx-auto text-sm leading-relaxed text-slate-300">
+              Your longitudinal mastery curves, WPM pacing trends, filler density reduction, and Interview Twin coaching profiles are securely private to your account.
+            </p>
+            <div className="mt-8 flex flex-wrap justify-center gap-4">
+              <button
+                type="button"
+                onClick={() => openAuthModal("login")}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-500 to-cyan-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-violet-500/25 hover:from-violet-400 hover:to-cyan-400 transition"
+              >
+                <LogIn className="h-4 w-4" />
+                <span>Sign In to Access Analytics</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => openAuthModal("signup")}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-slate-200 hover:bg-white/10 transition"
+              >
+                <span>Create Free Account</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Level & XP Master Bar */}
+            <div className="mt-8 rounded-2xl border border-white/8 bg-black/30 p-5 backdrop-blur-xl">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-400/40 bg-gradient-to-br from-violet-600/30 to-indigo-600/30 text-violet-200 shadow-inner">
+                    <Award className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-violet-300">
+                        Level {currentLevel}
+                      </span>
+                      <span className="text-slate-500">•</span>
+                      <span className="text-xs font-semibold text-slate-300">
+                        {levelNames[currentLevel - 1] || "Senior Engineer"}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-sm font-bold text-white">
+                      {totalXp} <span className="text-xs font-normal text-slate-400">/ {nextLevelXp} Practice XP</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-300">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {completedSessions.length} Sessions Evaluated
                   </span>
                 </div>
-                <p className="mt-0.5 text-sm font-bold text-white">
-                  {totalXp} <span className="text-xs font-normal text-slate-400">/ {nextLevelXp} Practice XP</span>
-                </p>
               </div>
-            </div>
 
-            {/* Micro badges */}
-            <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-              <div className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 px-3 py-1.5 text-amber-300">
-                <Flame className="h-4 w-4 fill-current text-amber-400" />
-                <span>3-Day Rep Streak</span>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/30 px-3 py-1.5 text-emerald-300">
-                <CheckCircle2 className="h-4 w-4" />
-                <span>{totalQuestionsPracticed} Answers Verified</span>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/30 px-3 py-1.5 text-cyan-300">
-                <Clock className="h-4 w-4" />
-                <span>{totalPracticeMinutes}m Speaking Time</span>
+              {/* Progress Track */}
+              <div className="mt-4">
+                <div className="h-3 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-800 p-0.5">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-violet-500 via-indigo-400 to-cyan-400 shadow-[0_0_12px_rgba(129,140,248,0.8)] transition-all duration-700"
+                    style={{ width: `${levelProgressPercent}%` }}
+                  />
+                </div>
+                <div className="mt-2 flex justify-between text-[11px] font-mono text-slate-400">
+                  <span>{levelProgressPercent}% toward Level {currentLevel + 1}</span>
+                  <span>{Math.max(0, nextLevelXp - totalXp)} XP to next tier</span>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Progress Track */}
-          <div className="mt-4">
-            <div className="h-3 w-full overflow-hidden rounded-full bg-slate-900 border border-slate-800 p-0.5">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-violet-500 via-indigo-400 to-cyan-400 shadow-[0_0_12px_rgba(129,140,248,0.8)] transition-all duration-700"
-                style={{ width: `${levelProgressPercent}%` }}
-              />
-            </div>
-            <div className="mt-2 flex justify-between text-[11px] font-mono text-slate-400">
-              <span>{levelProgressPercent}% toward Level {currentLevel + 1}</span>
-              <span>{Math.max(0, nextLevelXp - totalXp)} XP to next tier</span>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* ── 4 KEY METRIC CARDS WITH INTERACTIVE PROGRESS METERS ─────── */}

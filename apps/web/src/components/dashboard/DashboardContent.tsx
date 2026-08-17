@@ -42,6 +42,12 @@ export function DashboardContent() {
 
   useEffect(() => {
     async function loadInterviews() {
+      if (!user) {
+        setInterviews([]);
+        setLoadingInterviews(false);
+        return;
+      }
+
       try {
         setLoadingInterviews(true);
         const data = await apiClient.get<InterviewDetail[]>("/api/v1/interviews");
