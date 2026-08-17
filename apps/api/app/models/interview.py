@@ -1,46 +1,46 @@
 """
-APTLY API — Interview ORM Model (Phase 0 Stub)
-
-This is a minimal scaffold. Full schema expansion happens in Phase 1+.
-
-Future columns (documented here for migration planning):
-- job_id: FK to Job table
-- role_profile_id: FK to RoleProfile table
-- status: enum (created|configured|active|processing|completed|failed)
-- difficulty_level: int (1-5)
-- question_count: int
-- duration_seconds: int (actual recorded duration)
-- metrics_schema_version: str (version of scoring used)
-- evaluation_schema_version: str
-- media_deleted_at: datetime (when raw media was purged)
-- transcript_deleted_at: datetime
-- report_generated_at: datetime
-- interviewer_persona: str (for panel mode in future)
+APTLY API — Interview ORM Model
 """
 
 from __future__ import annotations
 
-from sqlalchemy import String
-from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.models.answer import Answer
+    from app.models.job import Job, RoleProfile
+    from app.models.question import Question
 
 
 class Interview(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     """
-    Core interview entity.
-
-    An Interview represents a single practice interview session.
-    One user may have many interviews over time (progress tracking).
-
-    Phase 0: Minimal columns only.
-    Phase 1+: Will be expanded with FK relationships and full status tracking.
+    Core interview entity representing an end-to-end practice session.
     """
 
     __tablename__ = "interviews"
 
-    # Phase 0: Bare minimum for scaffold
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+
+    # Foreign Keys
+    job_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    role_profile_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("role_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    # State machine: created -> ready -> running -> question_active -> answering -> answer_submitted -> processing -> next_question -> completing -> completed | failed
     status: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -48,18 +48,42 @@ class Interview(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
 
-    # Schema versioning — critical for analytics stability
-    # When scoring algorithms change, old interviews retain their original version
-    metrics_schema_version: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="1.0",
+    # Configuration
+    interview_type: Mapped[str] = mapped_column(String(50), nullable=False, default="mixed")
+    difficulty_level: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    target_duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    current_question_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Session timestamps
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Schema versioning
+    metrics_schema_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
+    evaluation_schema_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
+    scoring_algorithm_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
+
+    # Relationships
+    job: Mapped[Job | None] = relationship(
+        "Job", back_populates="interviews", lazy="selectin"
     )
-    evaluation_schema_version: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default="1.0",
+    role_profile: Mapped[RoleProfile | None] = relationship(
+        "RoleProfile", lazy="selectin"
+    )
+    questions: Mapped[list[Question]] = relationship(
+        "Question",
+        back_populates="interview",
+        order_by="Question.sequence_number",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    answers: Mapped[list[Answer]] = relationship(
+        "Answer",
+        back_populates="interview",
+        order_by="Answer.sequence_number",
+        lazy="selectin",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
-        return f"<Interview id={self.id} status={self.status}>"
+        return f"<Interview id={self.id} title={self.title} status={self.status}>"

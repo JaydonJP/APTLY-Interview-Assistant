@@ -50,20 +50,146 @@
         }
       }
     },
+    "/api/v1/jobs/analyze": {
+      "post": {
+        "tags": [
+          "Jobs & Roles"
+        ],
+        "summary": "Analyze a Job Description",
+        "description": "Parses a raw job description and extracts a structured RoleProfile.",
+        "operationId": "analyze_job_description_api_v1_jobs_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "Jobs & Roles"
+        ],
+        "summary": "Get Job & Role Profile",
+        "description": "Fetches an existing job and its structured role profile.",
+        "operationId": "get_job_api_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/interviews": {
       "post": {
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Create interview",
-        "description": "Creates a new interview session. Requires job description or role profile.",
+        "summary": "Create and configure interview",
+        "description": "Creates an interview session and dynamically generates tailored questions.",
         "operationId": "create_interview_api_v1_interviews_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewCreateRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "501": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -75,8 +201,8 @@
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Get interview",
-        "description": "Returns interview details, status, and question list.",
+        "summary": "Get interview details",
+        "description": "Fetches an interview, its active state, generated questions, and answers.",
         "operationId": "get_interview_api_v1_interviews__interview_id__get",
         "parameters": [
           {
@@ -91,11 +217,13 @@
           }
         ],
         "responses": {
-          "501": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetailResponse"
+                }
               }
             }
           },
@@ -117,8 +245,8 @@
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Start interview session",
-        "description": "Transitions interview to active state. Returns first question.",
+        "summary": "Start interview session",
+        "description": "Transitions the interview to active/running state and activates Question 1.",
         "operationId": "start_interview_api_v1_interviews__interview_id__start_post",
         "parameters": [
           {
@@ -133,11 +261,13 @@
           }
         ],
         "responses": {
-          "501": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetailResponse"
+                }
               }
             }
           },
@@ -159,9 +289,127 @@
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Submit answer",
-        "description": "Submits a recorded answer for async processing (transcription, analysis).",
-        "operationId": "submit_answer_api_v1_interviews__interview_id__answers_post",
+        "summary": "Create answer record",
+        "description": "Initializes a candidate answer recording for a question.",
+        "operationId": "create_answer_api_v1_interviews__interview_id__answers_post",
+        "parameters": [
+          {
+            "name": "interview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Interview Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interview_id}/answers/{answer_id}/upload": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Upload answer audio",
+        "description": "Uploads binary audio recording (WebM/WAV) and triggers async speech processing.",
+        "operationId": "upload_answer_audio_api_v1_interviews__interview_id__answers__answer_id__upload_post",
+        "parameters": [
+          {
+            "name": "interview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Interview Id"
+            }
+          },
+          {
+            "name": "answer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Answer Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_answer_audio_api_v1_interviews__interview_id__answers__answer_id__upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnswerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/interviews/{interview_id}/next-question": {
+      "post": {
+        "tags": [
+          "Interviews"
+        ],
+        "summary": "Advance to next question",
+        "description": "Advances the interview to the next question index or marks it completed.",
+        "operationId": "next_question_api_v1_interviews__interview_id__next_question_post",
         "parameters": [
           {
             "name": "interview_id",
@@ -175,11 +423,13 @@
           }
         ],
         "responses": {
-          "501": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetailResponse"
+                }
               }
             }
           },
@@ -201,8 +451,8 @@
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Finish interview",
-        "description": "Marks interview complete and triggers async report generation.",
+        "summary": "Finish interview session",
+        "description": "Finalizes the interview and marks it complete.",
         "operationId": "finish_interview_api_v1_interviews__interview_id__finish_post",
         "parameters": [
           {
@@ -217,11 +467,13 @@
           }
         ],
         "responses": {
-          "501": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewDetailResponse"
+                }
               }
             }
           },
@@ -238,14 +490,14 @@
         }
       }
     },
-    "/api/v1/interviews/{interview_id}/report": {
+    "/api/v1/interviews/{interview_id}/review": {
       "get": {
         "tags": [
           "Interviews"
         ],
-        "summary": "[Phase 1] Get interview report",
-        "description": "Returns the completed evaluation report with metrics and coaching.",
-        "operationId": "get_report_api_v1_interviews__interview_id__report_get",
+        "summary": "Get post-interview review",
+        "description": "Returns comprehensive speech metrics, transcripts, and question-by-question breakdown.",
+        "operationId": "get_interview_review_api_v1_interviews__interview_id__review_get",
         "parameters": [
           {
             "name": "interview_id",
@@ -259,11 +511,13 @@
           }
         ],
         "responses": {
-          "501": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewReviewResponse"
+                }
               }
             }
           },
@@ -279,50 +533,184 @@
           }
         }
       }
-    },
-    "/api/v1/progress": {
-      "get": {
-        "tags": [
-          "Interviews"
-        ],
-        "summary": "[Phase 1] Get user progress",
-        "description": "Returns historical progress snapshots and trend data.",
-        "operationId": "get_progress_api_v1_progress_get",
-        "responses": {
-          "501": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/jobs/analyze": {
-      "post": {
-        "tags": [
-          "Interviews"
-        ],
-        "summary": "[Phase 1] Analyze job description",
-        "description": "Parses a job description and returns a structured role profile.",
-        "operationId": "analyze_job_api_v1_jobs_analyze_post",
-        "responses": {
-          "501": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
+      "AnswerCreateRequest": {
+        "properties": {
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question_id"
+        ],
+        "title": "AnswerCreateRequest",
+        "description": "Payload to initialize a candidate answer for a question."
+      },
+      "AnswerResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "interview_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interview Id"
+          },
+          "question_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Question Id"
+          },
+          "sequence_number": {
+            "type": "integer",
+            "title": "Sequence Number"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "audio_storage_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Storage Key"
+          },
+          "audio_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Size Bytes"
+          },
+          "transcript": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "speech_metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeechMetricsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "interview_id",
+          "question_id",
+          "sequence_number",
+          "status",
+          "duration_seconds",
+          "created_at"
+        ],
+        "title": "AnswerResponse",
+        "description": "Candidate answer entity."
+      },
+      "Body_upload_answer_audio_api_v1_interviews__interview_id__answers__answer_id__upload_post": {
+        "properties": {
+          "audio_file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "Audio File",
+            "description": "Binary audio recording file"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds",
+            "description": "Total recorded duration in seconds",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "audio_file"
+        ],
+        "title": "Body_upload_answer_audio_api_v1_interviews__interview_id__answers__answer_id__upload_post"
+      },
+      "FillerOccurrence": {
+        "properties": {
+          "word": {
+            "type": "string",
+            "title": "Word"
+          },
+          "timestamp_seconds": {
+            "type": "number",
+            "title": "Timestamp Seconds"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds",
+            "default": 0.2
+          }
+        },
+        "type": "object",
+        "required": [
+          "word",
+          "timestamp_seconds"
+        ],
+        "title": "FillerOccurrence",
+        "description": "Individual filler word detection with timestamp."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -383,6 +771,674 @@
         "title": "HealthResponse",
         "description": "Response schema for health check endpoints."
       },
+      "InterviewCreateRequest": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "Associated job ID if created from a JD."
+          },
+          "role_profile_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Profile Id",
+            "description": "Associated role profile ID."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Title",
+            "default": "Practice Interview"
+          },
+          "interview_type": {
+            "type": "string",
+            "title": "Interview Type",
+            "description": "mixed, technical, behavioral",
+            "default": "mixed"
+          },
+          "difficulty_level": {
+            "type": "string",
+            "title": "Difficulty Level",
+            "description": "easy, medium, hard",
+            "default": "medium"
+          },
+          "target_duration_minutes": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 3.0,
+            "title": "Target Duration Minutes",
+            "default": 10
+          },
+          "question_count": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Question Count",
+            "default": 3
+          }
+        },
+        "type": "object",
+        "title": "InterviewCreateRequest",
+        "description": "Payload to create and configure a new interview session."
+      },
+      "InterviewDetailResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "interview_type": {
+            "type": "string",
+            "title": "Interview Type"
+          },
+          "difficulty_level": {
+            "type": "string",
+            "title": "Difficulty Level"
+          },
+          "target_duration_minutes": {
+            "type": "integer",
+            "title": "Target Duration Minutes"
+          },
+          "current_question_index": {
+            "type": "integer",
+            "title": "Current Question Index"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "role_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionResponse"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/AnswerResponse"
+            },
+            "type": "array",
+            "title": "Answers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "interview_type",
+          "difficulty_level",
+          "target_duration_minutes",
+          "current_question_index",
+          "created_at"
+        ],
+        "title": "InterviewDetailResponse",
+        "description": "Full detail view of an Interview including questions and answers."
+      },
+      "InterviewResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "interview_type": {
+            "type": "string",
+            "title": "Interview Type"
+          },
+          "difficulty_level": {
+            "type": "string",
+            "title": "Difficulty Level"
+          },
+          "target_duration_minutes": {
+            "type": "integer",
+            "title": "Target Duration Minutes"
+          },
+          "current_question_index": {
+            "type": "integer",
+            "title": "Current Question Index"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "status",
+          "interview_type",
+          "difficulty_level",
+          "target_duration_minutes",
+          "current_question_index",
+          "created_at"
+        ],
+        "title": "InterviewResponse",
+        "description": "Summary representation of an Interview."
+      },
+      "InterviewReviewResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "interview": {
+            "$ref": "#/components/schemas/InterviewResponse"
+          },
+          "role_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_duration_seconds": {
+            "type": "number",
+            "title": "Total Duration Seconds"
+          },
+          "total_answers_count": {
+            "type": "integer",
+            "title": "Total Answers Count"
+          },
+          "average_wpm": {
+            "type": "number",
+            "title": "Average Wpm"
+          },
+          "total_fillers_count": {
+            "type": "integer",
+            "title": "Total Fillers Count"
+          },
+          "overall_filler_density": {
+            "type": "number",
+            "title": "Overall Filler Density"
+          },
+          "total_pauses_count": {
+            "type": "integer",
+            "title": "Total Pauses Count"
+          },
+          "questions_review": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionReviewItem"
+            },
+            "type": "array",
+            "title": "Questions Review"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interview",
+          "total_duration_seconds",
+          "total_answers_count",
+          "average_wpm",
+          "total_fillers_count",
+          "overall_filler_density",
+          "total_pauses_count"
+        ],
+        "title": "InterviewReviewResponse",
+        "description": "Comprehensive post-interview review view."
+      },
+      "JobAnalyzeRequest": {
+        "properties": {
+          "job_description": {
+            "type": "string",
+            "maxLength": 50000,
+            "minLength": 20,
+            "title": "Job Description",
+            "description": "The raw text of the job description or posting.",
+            "examples": [
+              "Senior Backend Engineer with 5+ years of Python, FastAPI, PostgreSQL, and distributed systems experience."
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Optional job title override."
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company",
+            "description": "Optional hiring company name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_description"
+        ],
+        "title": "JobAnalyzeRequest",
+        "description": "Input payload for job description analysis."
+      },
+      "JobResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company"
+          },
+          "raw_text": {
+            "type": "string",
+            "title": "Raw Text"
+          },
+          "role_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoleProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "company",
+          "raw_text",
+          "created_at"
+        ],
+        "title": "JobResponse",
+        "description": "Full Job entity with its associated RoleProfile."
+      },
+      "PauseOccurrence": {
+        "properties": {
+          "start_seconds": {
+            "type": "number",
+            "title": "Start Seconds"
+          },
+          "end_seconds": {
+            "type": "number",
+            "title": "End Seconds"
+          },
+          "duration_seconds": {
+            "type": "number",
+            "title": "Duration Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_seconds",
+          "end_seconds",
+          "duration_seconds"
+        ],
+        "title": "PauseOccurrence",
+        "description": "Individual long pause with timestamps and duration."
+      },
+      "QuestionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "interview_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Interview Id"
+          },
+          "sequence_number": {
+            "type": "integer",
+            "title": "Sequence Number"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "question_type": {
+            "type": "string",
+            "title": "Question Type"
+          },
+          "competency": {
+            "type": "string",
+            "title": "Competency"
+          },
+          "difficulty": {
+            "type": "string",
+            "title": "Difficulty"
+          },
+          "question_text": {
+            "type": "string",
+            "title": "Question Text"
+          },
+          "expected_topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expected Topics"
+          },
+          "prompt_version": {
+            "type": "string",
+            "title": "Prompt Version",
+            "default": "v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "interview_id",
+          "sequence_number",
+          "category",
+          "question_type",
+          "competency",
+          "difficulty",
+          "question_text"
+        ],
+        "title": "QuestionResponse",
+        "description": "Schema for an interview question."
+      },
+      "QuestionReviewItem": {
+        "properties": {
+          "question": {
+            "$ref": "#/components/schemas/QuestionResponse"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnswerResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transcript": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "speech_metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpeechMetricsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "QuestionReviewItem",
+        "description": "Detailed review of an individual question and answer."
+      },
+      "RoleProfileResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "role_title": {
+            "type": "string",
+            "title": "Role Title"
+          },
+          "seniority": {
+            "type": "string",
+            "title": "Seniority"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "technical_skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Technical Skills"
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools"
+          },
+          "responsibilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Responsibilities"
+          },
+          "behavioral_competencies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Behavioral Competencies"
+          },
+          "interview_topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interview Topics"
+          },
+          "preferred_experience": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Preferred Experience"
+          },
+          "prompt_version": {
+            "type": "string",
+            "title": "Prompt Version",
+            "default": "v1"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "role_title",
+          "seniority",
+          "domain",
+          "created_at"
+        ],
+        "title": "RoleProfileResponse",
+        "description": "Structured role profile extracted from a job description."
+      },
       "ServiceStatus": {
         "properties": {
           "name": {
@@ -423,6 +1479,172 @@
         ],
         "title": "ServiceStatus",
         "description": "Status of an individual downstream service."
+      },
+      "SpeechMetricsResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "wpm": {
+            "type": "number",
+            "title": "Wpm"
+          },
+          "speaking_duration_seconds": {
+            "type": "number",
+            "title": "Speaking Duration Seconds"
+          },
+          "total_words": {
+            "type": "integer",
+            "title": "Total Words"
+          },
+          "filler_count": {
+            "type": "integer",
+            "title": "Filler Count"
+          },
+          "filler_density": {
+            "type": "number",
+            "title": "Filler Density"
+          },
+          "filler_words": {
+            "items": {
+              "$ref": "#/components/schemas/FillerOccurrence"
+            },
+            "type": "array",
+            "title": "Filler Words"
+          },
+          "pause_count": {
+            "type": "integer",
+            "title": "Pause Count"
+          },
+          "total_pause_seconds": {
+            "type": "number",
+            "title": "Total Pause Seconds"
+          },
+          "pauses": {
+            "items": {
+              "$ref": "#/components/schemas/PauseOccurrence"
+            },
+            "type": "array",
+            "title": "Pauses"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "answer_id",
+          "wpm",
+          "speaking_duration_seconds",
+          "total_words",
+          "filler_count",
+          "filler_density",
+          "pause_count",
+          "total_pause_seconds",
+          "created_at"
+        ],
+        "title": "SpeechMetricsResponse",
+        "description": "Deterministic speech metrics computed from word timestamps."
+      },
+      "TranscriptResponse": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "title": "Schema Version",
+            "description": "Schema version. Increment when structure changes.",
+            "default": "1.0",
+            "examples": [
+              "1.0",
+              "1.1",
+              "2.0"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "answer_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Answer Id"
+          },
+          "full_text": {
+            "type": "string",
+            "title": "Full Text"
+          },
+          "word_count": {
+            "type": "integer",
+            "title": "Word Count"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language",
+            "default": "en"
+          },
+          "segments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Segments"
+          },
+          "words": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Words"
+          },
+          "model_provider": {
+            "type": "string",
+            "title": "Model Provider",
+            "default": "mock"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "default": "mock-v1.0"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "answer_id",
+          "full_text",
+          "word_count",
+          "created_at"
+        ],
+        "title": "TranscriptResponse",
+        "description": "Full word-level aligned transcript."
       },
       "ValidationError": {
         "properties": {

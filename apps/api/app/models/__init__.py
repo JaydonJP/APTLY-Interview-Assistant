@@ -1,3 +1,22 @@
 """
-APTLY API — app/models/__init__.py
+APTLY API — Models Export
 """
+
+from app.models.answer import Answer
+from app.models.base import Base
+from app.models.interview import Interview
+from app.models.job import Job, RoleProfile
+from app.models.metrics import SpeechMetrics
+from app.models.question import Question
+from app.models.transcript import Transcript
+
+__all__ = [
+    "Answer",
+    "Base",
+    "Interview",
+    "Job",
+    "Question",
+    "RoleProfile",
+    "SpeechMetrics",
+    "Transcript",
+]

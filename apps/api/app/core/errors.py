@@ -67,9 +67,12 @@ class AptlyException(Exception):
         self,
         message: str | None = None,
         details: dict[str, Any] | None = None,
+        code: str | None = None,
     ) -> None:
         self.message = message or self.default_message
         self.details = details
+        if code:
+            self.error_code = code
         super().__init__(self.message)
 
 
