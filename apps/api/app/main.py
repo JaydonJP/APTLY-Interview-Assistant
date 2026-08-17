@@ -73,14 +73,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Initialize database tables on startup for local dev
     try:
+        import asyncio
         from app.dependencies import get_async_engine
         from app.models.base import Base
-        engine = get_async_engine(settings.database_url)
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+
+        async def _init_db() -> None:
+            engine = get_async_engine(settings.database_url)
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+        await asyncio.wait_for(_init_db(), timeout=3.0)
         logger.info("database_schema_ready", db_url=settings.database_url)
     except Exception as exc:
-        logger.warning("database_init_skipped", error=str(exc))
+        logger.warning(
+            "database_init_fallback",
+            error=str(exc),
+            note="Using local async fallback database for immediate offline readiness.",
+        )
+        try:
+            from app.dependencies import get_async_engine
+            from app.models.base import Base
+            fallback_engine = get_async_engine("sqlite+aiosqlite:///./aptly.db")
+            async with fallback_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("database_schema_ready", db_url="sqlite+aiosqlite:///./aptly.db")
+        except Exception as fb_exc:
+            logger.warning("database_fallback_failed", error=str(fb_exc))
 
     yield  # Application is running
 

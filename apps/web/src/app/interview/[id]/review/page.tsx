@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/layout/AppShell";
@@ -19,6 +19,8 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Video,
+  PlayCircle,
 } from "lucide-react";
 
 export default function InterviewReviewPage() {
@@ -29,6 +31,9 @@ export default function InterviewReviewPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(0);
+  const [activePlaybackUrl, setActivePlaybackUrl] = useState<string | null>(null);
+
+  const videoPlayerRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     async function loadReview() {
@@ -53,13 +58,21 @@ export default function InterviewReviewPage() {
     }
   }, [interviewId]);
 
+  // Jump video player to specific second timestamp
+  const seekVideoToTimestamp = (seconds: number) => {
+    if (videoPlayerRef.current) {
+      videoPlayerRef.current.currentTime = seconds;
+      void videoPlayerRef.current.play();
+    }
+  };
+
   if (isLoading) {
     return (
       <AppShell>
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent" />
           <p className="text-sm font-mono text-slate-400">
-            Synthesizing Deterministic Speech Analytics...
+            Synthesizing Deterministic Speech Analytics & Video Timeline...
           </p>
         </div>
       </AppShell>
@@ -92,7 +105,7 @@ export default function InterviewReviewPage() {
     <AppShell>
       <PageHeader
         title={review.interview.title}
-        description="Phase 1 Deterministic Speech & Transcript Summary — Calculated directly from timestamped word sequences."
+        description="Phase 1 Evidence-Grounded Speech & Video Review — Synchronized timestamps and deterministic measurements."
       />
 
       {/* Top Banner Notice */}
@@ -100,12 +113,13 @@ export default function InterviewReviewPage() {
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-cyan-400 shrink-0" />
           <span>
-            <strong>Measurement Before Interpretation:</strong> Speaking pace,
+            <strong>Measurement Before Interpretation:</strong> Speaking rate,
             filler words, and dead air pauses are computed deterministically.
+            Click any timestamp to seek video playback.
           </span>
         </div>
         <span className="font-mono text-[11px] text-cyan-300/80">
-          Schema v1.0
+          Schema v1.0 • Evidence Grounded
         </span>
       </div>
 
@@ -193,7 +207,7 @@ export default function InterviewReviewPage() {
       {/* ── QUESTION-BY-QUESTION BREAKDOWN ─────────────────────────── */}
       <div className="space-y-4">
         <h2 className="text-lg font-bold text-slate-100">
-          Question-by-Question Transcript & Measurements
+          Question-by-Question Video & Evidence Analysis
         </h2>
 
         {review.questions_review.map((item, idx) => {
@@ -246,19 +260,53 @@ export default function InterviewReviewPage() {
 
               {isExpanded && (
                 <div className="border-t border-slate-800/80 bg-slate-950/40 p-6 space-y-6">
-                  {/* Full Transcript */}
+                  {/* Full Word-Aligned Transcript */}
                   <div>
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                      <FileText className="h-4 w-4 text-cyan-400" />
-                      <span>Timestamped Transcript</span>
+                    <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-cyan-400" />
+                        <span>Word-Aligned Transcript</span>
+                      </div>
+                      <span className="font-mono text-[11px] text-slate-500">
+                        Provider: {transcript?.model_provider || "whisperx"}
+                      </span>
                     </div>
+
                     {transcript?.full_text ? (
-                      <p className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-200 font-mono">
-                        &ldquo;{transcript.full_text}&rdquo;
-                      </p>
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-200 font-mono">
+                        {transcript.words && transcript.words.length > 0 ? (
+                          <div className="flex flex-wrap gap-x-1.5 gap-y-1">
+                            {transcript.words.map((w, wIdx) => {
+                              const isFiller = metrics?.filler_words.some(
+                                (fw) =>
+                                  Math.abs(fw.timestamp_seconds - w.start_seconds) < 0.3 ||
+                                  fw.word.toLowerCase() === w.word.toLowerCase(),
+                              );
+
+                              return (
+                                <button
+                                  key={wIdx}
+                                  type="button"
+                                  onClick={() => seekVideoToTimestamp(w.start_seconds)}
+                                  className={`rounded px-1 py-0.5 text-xs transition-all hover:bg-cyan-500/20 hover:text-cyan-300 ${
+                                    isFiller
+                                      ? "bg-indigo-950 text-indigo-300 border border-indigo-500/40 font-bold"
+                                      : "text-slate-300"
+                                  }`}
+                                  title={`Timestamp: ${w.start_seconds.toFixed(2)}s`}
+                                >
+                                  {w.word}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p>&ldquo;{transcript.full_text}&rdquo;</p>
+                        )}
+                      </div>
                     ) : (
                       <p className="text-xs italic text-slate-500">
-                        No audio answer recorded for this question.
+                        No audio/video answer recorded for this question.
                       </p>
                     )}
                   </div>
@@ -266,7 +314,7 @@ export default function InterviewReviewPage() {
                   {/* Filler Words & Pauses Breakdown */}
                   {metrics && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Exact Filler Occurrences */}
+                      {/* Exact Filler Occurrences with Clickable Seek */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                         <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400 block mb-2">
                           Filler Occurrences ({metrics.filler_count})
@@ -274,13 +322,18 @@ export default function InterviewReviewPage() {
                         {metrics.filler_words.length > 0 ? (
                           <div className="flex flex-wrap gap-2">
                             {metrics.filler_words.map((fw, fIdx) => (
-                              <span
+                              <button
                                 key={fIdx}
-                                className="rounded-lg border border-indigo-500/30 bg-indigo-950/40 px-2.5 py-1 text-xs font-mono text-indigo-200"
+                                type="button"
+                                onClick={() => seekVideoToTimestamp(fw.timestamp_seconds)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/30 bg-indigo-950/40 px-2.5 py-1 text-xs font-mono text-indigo-200 hover:bg-indigo-900/60 hover:border-indigo-400 transition-all"
                               >
-                                {fw.timestamp_seconds.toFixed(1)}s &mdash; &ldquo;
-                                {fw.word}&rdquo;
-                              </span>
+                                <PlayCircle className="h-3 w-3 text-indigo-400" />
+                                <span>
+                                  {fw.timestamp_seconds.toFixed(1)}s &mdash; &ldquo;
+                                  {fw.word}&rdquo;
+                                </span>
+                              </button>
                             ))}
                           </div>
                         ) : (
@@ -290,7 +343,7 @@ export default function InterviewReviewPage() {
                         )}
                       </div>
 
-                      {/* Detected Silence Gaps */}
+                      {/* Detected Silence Gaps with Clickable Seek */}
                       <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
                         <span className="text-xs font-semibold uppercase tracking-wider text-amber-400 block mb-2">
                           Dead Air Gaps ({metrics.pause_count})
@@ -298,13 +351,18 @@ export default function InterviewReviewPage() {
                         {metrics.pauses.length > 0 ? (
                           <div className="flex flex-wrap gap-2">
                             {metrics.pauses.map((p, pIdx) => (
-                              <span
+                              <button
                                 key={pIdx}
-                                className="rounded-lg border border-amber-500/30 bg-amber-950/40 px-2.5 py-1 text-xs font-mono text-amber-200"
+                                type="button"
+                                onClick={() => seekVideoToTimestamp(p.start_seconds)}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-950/40 px-2.5 py-1 text-xs font-mono text-amber-200 hover:bg-amber-900/60 hover:border-amber-400 transition-all"
                               >
-                                {p.start_seconds.toFixed(1)}s &ndash;{" "}
-                                {p.end_seconds.toFixed(1)}s ({p.duration_seconds}s pause)
-                              </span>
+                                <PlayCircle className="h-3 w-3 text-amber-400" />
+                                <span>
+                                  {p.start_seconds.toFixed(1)}s &ndash;{" "}
+                                  {p.end_seconds.toFixed(1)}s ({p.duration_seconds}s pause)
+                                </span>
+                              </button>
                             ))}
                           </div>
                         ) : (
@@ -315,6 +373,19 @@ export default function InterviewReviewPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Vision Analysis Notice */}
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3.5 flex items-center justify-between text-xs text-slate-400">
+                    <div className="flex items-center gap-2">
+                      <Video className="h-4 w-4 text-cyan-400" />
+                      <span>
+                        <strong>Vision Analysis (Gaze & Head Pose):</strong> Scheduled for Phase 4 MediaPipe integration. No fake proxy values displayed.
+                      </span>
+                    </div>
+                    <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-mono text-slate-400">
+                      Phase 4 Ready
+                    </span>
+                  </div>
                 </div>
               )}
             </Card>

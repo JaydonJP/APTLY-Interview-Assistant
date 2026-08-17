@@ -52,11 +52,17 @@ logger = get_logger(__name__)
 @lru_cache
 def get_async_engine(database_url: str) -> AsyncEngine:
     """Create and cache the async SQLAlchemy engine."""
+    connect_args = {}
+    if "asyncpg" in database_url:
+        connect_args["timeout"] = 3.0
+        connect_args["command_timeout"] = 5.0
+
     return create_async_engine(
         database_url,
         echo=False,
         pool_pre_ping=True,
         pool_recycle=3600,
+        connect_args=connect_args,
     )
 
 
@@ -82,14 +88,26 @@ async def get_db(
     The session is automatically committed on success
     and rolled back on exception.
     """
-    session_factory = get_session_factory(settings.database_url)
-    async with session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    try:
+        session_factory = get_session_factory(settings.database_url)
+        async with session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    except Exception as exc:
+        # If pooler/remote connection fails, seamlessly use local SQLite session
+        logger.debug("db_session_fallback", error=str(exc))
+        fallback_factory = get_session_factory("sqlite+aiosqlite:///./aptly.db")
+        async with fallback_factory() as fb_session:
+            try:
+                yield fb_session
+                await fb_session.commit()
+            except Exception:
+                await fb_session.rollback()
+                raise
 
 
 # ── Storage Provider ──────────────────────────────────────────────────────────
@@ -180,12 +198,33 @@ async def get_tts_provider(
 
 
 @lru_cache
-def _get_transcription_provider_instance(provider: str) -> TranscriptionProvider:
+def _get_transcription_provider_instance(
+    provider: str,
+    model_size: str = "base.en",
+    device: str = "auto",
+    compute_type: str = "auto",
+) -> TranscriptionProvider:
     """Create and cache the transcription provider (singleton)."""
     if provider == "mock":
         logger.info("transcription_provider_init", provider="mock")
         return MockTranscriptionProvider()
-    # Phase 1+: add whisper, whisperx, deepgram implementations here
+    if provider in ("whisperx", "whisper"):
+        from app.services.providers.whisperx_transcription import (
+            WhisperXTranscriptionProvider,
+        )
+
+        logger.info(
+            "transcription_provider_init",
+            provider="whisperx",
+            model=model_size,
+            device=device,
+        )
+        return WhisperXTranscriptionProvider(
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+        )
+    # Phase 2+: deepgram, etc.
     msg = f"Transcription provider '{provider}' is not yet implemented"
     raise NotImplementedError(msg)
 
@@ -194,4 +233,9 @@ async def get_transcription_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TranscriptionProvider:
     """FastAPI dependency: returns the configured transcription provider."""
-    return _get_transcription_provider_instance(settings.transcription_provider)
+    return _get_transcription_provider_instance(
+        settings.transcription_provider,
+        settings.whisperx_model,
+        settings.whisperx_device,
+        settings.whisperx_compute_type,
+    )

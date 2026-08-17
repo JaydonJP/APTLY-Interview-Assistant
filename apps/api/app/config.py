@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     # ── Transcription Provider ────────────────────────────────
     transcription_provider: Literal["mock", "whisper", "whisperx", "deepgram"] = "mock"
     transcription_api_key: str = ""
+    whisperx_model: str = "base.en"
+    whisperx_device: str = "auto"
+    whisperx_compute_type: str = "auto"
+    whisperx_language: str = "en"
 
     # ── Feature Flags ─────────────────────────────────────────
     feature_realtime_interview: bool = False

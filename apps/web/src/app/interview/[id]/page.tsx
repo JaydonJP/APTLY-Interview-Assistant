@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
+import { VideoPreview } from "@/components/camera/VideoPreview";
 import { AudioVisualizer } from "@/components/audio/AudioVisualizer";
 import { Card } from "@/components/ui/Card";
-import { useAudioRecorder } from "@/hooks/useAudioRecorder";
+import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
 import { apiClient } from "@/lib/api-client";
 import type { Answer, InterviewDetail, Question } from "@/types/interview";
 import {
-  Mic,
+  Video,
   Square,
   RefreshCw,
   Send,
@@ -33,18 +34,20 @@ export default function LiveInterviewRoomPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState<Answer | null>(null);
 
-  // Audio Recorder hook
+  // Unified Camera + Microphone Capture Hook
   const {
     isRecording,
+    isCameraReady,
+    isMicReady,
     recordingDuration,
-    audioBlob,
-    audioUrl,
+    recordedBlob,
+    recordedUrl,
     stream,
-    error: micError,
+    error: mediaError,
     startRecording,
     stopRecording,
     resetRecording,
-  } = useAudioRecorder();
+  } = useMediaCapture({ enableVideo: true, enableAudio: true });
 
   // WebSocket hook for live session events & heartbeat
   const { status: wsStatus } = useInterviewWebSocket({
@@ -99,14 +102,14 @@ export default function LiveInterviewRoomPage() {
   const currentQIndex = (interview?.current_question_index || 0) + 1;
   const isLastQuestion = currentQIndex >= totalQuestions;
 
-  // Handle Stop Recording & Prepare Audio
+  // Handle Stop Recording & Prepare Video/Audio
   const handleStopRecording = async () => {
     await stopRecording();
   };
 
   // Submit Answer to Backend
   const handleSubmitAnswer = async () => {
-    if (!audioBlob || !currentQuestion) return;
+    if (!recordedBlob || !currentQuestion) return;
 
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -123,9 +126,13 @@ export default function LiveInterviewRoomPage() {
         setCurrentAnswer(createdAns);
       }
 
-      // 2. Upload audio binary via FormData
+      // 2. Upload video/audio binary via FormData
       const formData = new FormData();
-      formData.append("audio_file", audioBlob, `answer_${currentQuestion.id}.webm`);
+      formData.append(
+        "audio_file",
+        recordedBlob,
+        `recording_${currentQuestion.id}.webm`,
+      );
       formData.append("duration_seconds", String(recordingDuration || 5.0));
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -138,7 +145,7 @@ export default function LiveInterviewRoomPage() {
       );
 
       if (!uploadRes.ok) {
-        throw new Error("Failed to upload audio recording.");
+        throw new Error("Failed to upload recording to storage.");
       }
 
       const processedAns = (await uploadRes.json()) as Answer;
@@ -152,7 +159,7 @@ export default function LiveInterviewRoomPage() {
       resetRecording();
     } catch (err: unknown) {
       setErrorMessage(
-        err instanceof Error ? err.message : "Error uploading and processing answer.",
+        err instanceof Error ? err.message : "Error uploading and processing recording.",
       );
     } finally {
       setIsSubmitting(false);
@@ -207,7 +214,7 @@ export default function LiveInterviewRoomPage() {
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent" />
           <p className="text-sm font-mono text-slate-400">
-            Initializing Realtime Interview Session...
+            Initializing Realtime Interview Session & Video Engine...
           </p>
         </div>
       </AppShell>
@@ -268,13 +275,13 @@ export default function LiveInterviewRoomPage() {
         </div>
       </div>
 
-      {(errorMessage || micError) && (
+      {(errorMessage || mediaError) && (
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-950/40 p-4 text-sm text-red-200 backdrop-blur-md">
           <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold">Microphone / Session Notice</p>
+            <p className="font-semibold">Camera / Microphone Notice</p>
             <p className="text-xs text-red-300/90 mt-0.5">
-              {errorMessage || micError}
+              {errorMessage || mediaError}
             </p>
           </div>
         </div>
@@ -283,8 +290,8 @@ export default function LiveInterviewRoomPage() {
       {/* ── MAIN INTERVIEW SPLIT CONSOLE ──────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Active Question */}
-        <div className="lg:col-span-7 space-y-6">
-          <Card className="glass-panel-glow p-8 min-h-[380px] flex flex-col justify-between">
+        <div className="lg:col-span-6 space-y-6">
+          <Card className="glass-panel-glow p-8 min-h-[420px] flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -327,22 +334,18 @@ export default function LiveInterviewRoomPage() {
           </Card>
         </div>
 
-        {/* Right Column: Audio & Microphone Console */}
-        <div className="lg:col-span-5 space-y-6">
-          <Card
-            className={`glass-panel p-6 transition-all ${
-              isRecording ? "recording-pulse" : ""
-            }`}
-          >
+        {/* Right Column: Live Camera Video & Recording Console */}
+        <div className="lg:col-span-6 space-y-6">
+          <Card className="glass-panel p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <Mic
+                <Video
                   className={`h-5 w-5 ${
                     isRecording ? "text-red-400 animate-pulse" : "text-cyan-400"
                   }`}
                 />
                 <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
-                  Audio Recording Console
+                  Live Video & Audio Capture
                 </h3>
               </div>
               <div className="flex items-center gap-2 font-mono text-sm">
@@ -355,24 +358,34 @@ export default function LiveInterviewRoomPage() {
               </div>
             </div>
 
-            {/* Audio Waveform Visualizer */}
+            {/* Live Camera Preview / Recorded Video Playback */}
+            <VideoPreview
+              stream={stream}
+              recordedUrl={recordedUrl}
+              isRecording={isRecording}
+              isCameraReady={isCameraReady}
+              isMicReady={isMicReady}
+              className="mb-4"
+            />
+
+            {/* Live Audio Frequency Waveform */}
             <AudioVisualizer
               stream={stream}
               isRecording={isRecording}
-              className="my-4"
+              className="my-3"
             />
 
             {/* Recording Controls */}
-            <div className="mt-6 flex flex-col gap-3">
-              {!isRecording && !audioBlob && (
+            <div className="mt-4 flex flex-col gap-3">
+              {!isRecording && !recordedBlob && (
                 <button
                   type="button"
                   onClick={startRecording}
                   disabled={isSubmitting}
-                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 px-6 py-4 text-sm font-bold text-white shadow-lg shadow-red-500/20 transition-all hover:from-red-400 hover:to-rose-500 hover:shadow-red-500/30 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-500/20 transition-all hover:from-red-400 hover:to-rose-500 hover:shadow-red-500/30 disabled:opacity-50"
                 >
-                  <Mic className="h-5 w-5" />
-                  <span>Start Answer Recording</span>
+                  <Video className="h-5 w-5" />
+                  <span>Start Answer Recording (Video + Audio)</span>
                 </button>
               )}
 
@@ -380,28 +393,15 @@ export default function LiveInterviewRoomPage() {
                 <button
                   type="button"
                   onClick={handleStopRecording}
-                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-4 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-all hover:from-amber-400 hover:to-orange-500 animate-pulse"
+                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-all hover:from-amber-400 hover:to-orange-500 animate-pulse"
                 >
                   <Square className="h-5 w-5 fill-current" />
                   <span>Stop Recording</span>
                 </button>
               )}
 
-              {audioBlob && !isRecording && (
+              {recordedBlob && !isRecording && (
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-3">
-                    <p className="text-xs text-slate-400 mb-1.5 font-medium">
-                      Playback Recorded Audio Preview:
-                    </p>
-                    {audioUrl && (
-                      <audio
-                        src={audioUrl}
-                        controls
-                        className="w-full h-10 rounded-lg outline-none"
-                      />
-                    )}
-                  </div>
-
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -422,7 +422,7 @@ export default function LiveInterviewRoomPage() {
                       {isSubmitting ? (
                         <>
                           <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          <span>Processing Speech...</span>
+                          <span>Processing Speech & Video...</span>
                         </>
                       ) : (
                         <>
@@ -437,12 +437,12 @@ export default function LiveInterviewRoomPage() {
 
               {/* Already Submitted / Processed State */}
               {currentAnswer && currentAnswer.status === "transcribed" && (
-                <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-4">
+                <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-3.5">
                   <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs mb-1">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>Answer Transcribed & Measured</span>
                   </div>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-xs text-slate-300 font-mono">
                     Speech rate: {currentAnswer.speech_metrics?.wpm} WPM •{" "}
                     {currentAnswer.speech_metrics?.filler_count} Fillers detected
                   </p>
