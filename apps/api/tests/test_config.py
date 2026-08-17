@@ -23,6 +23,15 @@ def test_settings_loads_with_defaults() -> None:
 
 
 @pytest.mark.unit
+def test_local_database_default_matches_docker_compose() -> None:
+    """The API default must target the credentials exposed by Compose."""
+    settings = Settings(_env_file=None, secret_key="test-secret")  # type: ignore[call-arg]
+    assert settings.database_url == (
+        "postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev"
+    )
+
+
+@pytest.mark.unit
 def test_settings_mock_providers_default() -> None:
     """All AI providers default to mock in base configuration."""
     settings = Settings(

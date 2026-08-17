@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["Health"])
 
 
-async def _check_database(db: AsyncSession) -> ServiceStatus:
+async def _check_database(db: AsyncSession, database_name: str) -> ServiceStatus:
     """Ping the database and return its status."""
     import time
 
@@ -40,13 +40,13 @@ async def _check_database(db: AsyncSession) -> ServiceStatus:
         await db.execute(text("SELECT 1"))
         latency_ms = (time.monotonic() - start) * 1000
         return ServiceStatus(
-            name="postgresql",
+            name=database_name,
             status="ok",
             latency_ms=round(latency_ms, 2),
         )
     except Exception as exc:
         return ServiceStatus(
-            name="postgresql",
+            name=database_name,
             status="unavailable",
             message=str(exc)[:100],  # Truncate — don't leak full error
         )
@@ -107,8 +107,9 @@ async def v1_health(
     """
     services: list[ServiceStatus] = []
 
+    database_name = settings.database_url.split(":", 1)[0].split("+", 1)[0]
     # Check database
-    db_status = await _check_database(db)
+    db_status = await _check_database(db, database_name)
     services.append(db_status)
 
     # Add provider statuses (Phase 0: always ok for mocks)

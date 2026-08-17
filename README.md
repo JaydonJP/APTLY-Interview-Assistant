@@ -22,8 +22,9 @@ python -m venv .venv
 .venv\\Scripts\\python -m pip install -e ".[dev]"   # Windows
 # .venv/bin/python -m pip install -e ".[dev]"        # macOS/Linux
 
-# The default configuration uses SQLite-compatible test settings, local storage,
-# and mock AI providers, so no API keys are required for a demo.
+# Copy the repository .env.example to apps/api/.env first. The default local
+# configuration uses Docker PostgreSQL, local storage, and mock AI providers.
+# No AI API keys are required for a demo.
 .venv\\Scripts\\uvicorn app.main:app --reload --port 8000
 ```
 
@@ -87,7 +88,25 @@ npm test
 npm run build
 ```
 
-The PostgreSQL and Redis integration tests are skipped automatically when those services are not running.
+Start PostgreSQL and Redis before the API when using the default configuration:
+
+```bash
+docker compose up -d postgres redis
+docker compose ps
+```
+
+If the database container was created before the current initialization script,
+apply the UUID extension once without deleting data:
+
+```bash
+docker exec aptly_postgres psql -U aptly -d aptly_dev -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+```
+
+If this is disposable local data and the existing volume has stale credentials,
+`docker compose down -v` followed by `docker compose up -d postgres redis` resets
+the database. This deletes the local PostgreSQL and Redis volumes.
+
+The PostgreSQL integration test is skipped automatically when PostgreSQL is not running. The API itself now fails fast with a clear startup error instead of pretending that a PostgreSQL connection was replaced by SQLite.
 
 ## Repository map
 

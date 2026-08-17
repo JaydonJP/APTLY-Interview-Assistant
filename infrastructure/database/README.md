@@ -31,4 +31,4 @@ alembic downgrade -1
 
 ## Docker Container
 
-The PostgreSQL container is initialized with `infrastructure/docker/postgres/init.sql`, enabling the `uuid-ossp` extension.
+The PostgreSQL container is initialized with `infrastructure/docker/postgres/init.sql`, enabling the `uuid-ossp` and `pgcrypto` extensions. `pgcrypto` is required by the Alembic UUID defaults that call `gen_random_uuid()`.

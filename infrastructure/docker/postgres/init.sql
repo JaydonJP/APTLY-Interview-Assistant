@@ -5,6 +5,8 @@
 
 -- Enable UUID generation (needed for UUID primary keys)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- Alembic migrations use gen_random_uuid() for server-side UUID defaults.
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Enable pg_stat_statements for query monitoring (future observability)
 -- CREATE EXTENSION IF NOT EXISTS pg_stat_statements;

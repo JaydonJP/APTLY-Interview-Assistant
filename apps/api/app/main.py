@@ -25,6 +25,7 @@ To start locally:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -71,35 +72,56 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ),
         )
 
-    # Initialize database tables on startup for local dev
+    # Initialize database tables on startup for local development. PostgreSQL
+    # may take a few seconds to become ready after Docker starts, so retry the
+    # connection instead of racing the container and masking the failure with
+    # an unrelated SQLite database.
+    from app.dependencies import get_async_engine
+    from app.models.base import Base
+
+    async def _init_db() -> None:
+        engine = get_async_engine(settings.database_url)
+        attempts = 5 if settings.database_url.startswith("postgresql") else 1
+        last_error: Exception | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                async with engine.begin() as conn:
+                    await conn.run_sync(Base.metadata.create_all)
+                return
+            except Exception as exc:
+                last_error = exc
+                await engine.dispose()
+                if attempt == attempts:
+                    raise
+                delay_seconds = min(2 * attempt, 8)
+                logger.warning(
+                    "database_init_retry",
+                    attempt=attempt,
+                    next_attempt_in_seconds=delay_seconds,
+                    error=str(exc)[:200],
+                )
+                await asyncio.sleep(delay_seconds)
+
+        if last_error:
+            raise last_error
+
     try:
-        import asyncio
-
-        from app.dependencies import get_async_engine
-        from app.models.base import Base
-
-        async def _init_db() -> None:
-            engine = get_async_engine(settings.database_url)
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-
-        await asyncio.wait_for(_init_db(), timeout=3.0)
-        logger.info("database_schema_ready", db_url=settings.database_url)
-    except Exception as exc:
-        logger.warning(
-            "database_init_fallback",
-            error=str(exc),
-            note="Using local async fallback database for immediate offline readiness.",
+        await asyncio.wait_for(_init_db(), timeout=45.0)
+        logger.info(
+            "database_schema_ready",
+            database_driver=settings.database_url.split(":", 1)[0],
         )
-        try:
-            from app.dependencies import get_async_engine
-            from app.models.base import Base
-            fallback_engine = get_async_engine("sqlite+aiosqlite:///./aptly.db")
-            async with fallback_engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            logger.info("database_schema_ready", db_url="sqlite+aiosqlite:///./aptly.db")
-        except Exception as fb_exc:
-            logger.warning("database_fallback_failed", error=str(fb_exc))
+    except Exception as exc:
+        logger.error(
+            "database_init_failed",
+            database_driver=settings.database_url.split(":", 1)[0],
+            error=str(exc)[:300],
+        )
+        raise RuntimeError(
+            "PostgreSQL is unavailable. Start `docker compose up -d postgres` "
+            "or set DATABASE_URL to a reachable PostgreSQL instance."
+        ) from exc
 
     yield  # Application is running
 

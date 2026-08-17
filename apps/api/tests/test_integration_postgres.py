@@ -21,7 +21,7 @@ from app.models.interview import Interview
 
 POSTGRES_TEST_URL = os.getenv(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://aptly_user:aptly_password@localhost:5432/aptly_db",
+    "postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev",
 )
 
 

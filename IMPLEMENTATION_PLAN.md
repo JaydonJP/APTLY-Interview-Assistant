@@ -46,3 +46,10 @@ Status: in progress until push succeeds.
 ## Deliberate measurement boundary
 
 The report labels camera attention and voice energy as unavailable until a reliable, privacy-safe telemetry pipeline is attached. APTLY does not fabricate eye contact, emotion, identity, or personality scores; it only presents signals that can be measured and replayed.
+
+## PostgreSQL reliability follow-up
+
+- Aligned local Compose credentials, API defaults, integration-test defaults, and environment examples.
+- Added `pgcrypto` initialization for migration UUID defaults.
+- Added PostgreSQL readiness retries and replaced the misleading SQLite startup fallback with a clear failure message.
+- Added regression coverage for the local database contract and documented existing-volume troubleshooting.
