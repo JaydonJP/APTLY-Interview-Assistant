@@ -312,6 +312,27 @@ export interface DeliveryOverview {
   metric_notes: string[];
 }
 
+export interface ConfidencePoint {
+  question_number: number;
+  score: number;
+  competency: string;
+  status: "STRONG" | "MODERATE" | "CRUMBLED" | string;
+}
+
+export interface CrumblePoint {
+  question_number: number;
+  question_text: string;
+  competency: string;
+  score: number;
+  note: string;
+}
+
+export interface PrivacyNote {
+  processing: string;
+  storage: string;
+  retention: string;
+}
+
 export interface InterviewReportCard {
   overall_score: number;
   content_score: number;
@@ -319,6 +340,9 @@ export interface InterviewReportCard {
   confidence_label: string;
   strengths: string[];
   top_habits: ReportHabit[];
+  confidence_trend?: ConfidencePoint[];
+  crumble_point?: CrumblePoint | null;
+  privacy_note?: PrivacyNote;
   evidence_events: EvidenceEvent[];
   competency_coverage?: SessionCompetencyCoverage | null;
   delivery: DeliveryOverview;

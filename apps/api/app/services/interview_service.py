@@ -1002,6 +1002,33 @@ class InterviewService:
         # Sorted by timestamp order
         sorted_events = sorted(unique_events, key=lambda e: (e.start_ms, e.end_ms))
 
+        # Compute Confidence Trend & Crumble Point
+        confidence_points = []
+        crumble_point = None
+        min_score = 101.0
+
+        for item in questions_review:
+            q_num = item["question"]["sequence_number"]
+            cm = item.get("content_metrics") or {}
+            score = float(cm.get("overall_content_score", 0.0))
+            if score > 0:
+                confidence_points.append({
+                    "question_number": q_num,
+                    "score": score,
+                    "competency": item["question"].get("competency") or "General",
+                    "status": "STRONG" if score >= 75 else ("MODERATE" if score >= 50 else "CRUMBLED"),
+                })
+                if score < min_score:
+                    min_score = score
+                    if score < 60:
+                        crumble_point = {
+                            "question_number": q_num,
+                            "question_text": item["question"]["question_text"],
+                            "competency": item["question"].get("competency") or "Technical Depth",
+                            "score": score,
+                            "note": f"Candidate struggled on Question {q_num} ('{item['question'].get('competency', 'Technical')}') where score dropped to {score:.0f}/100.",
+                        }
+
         return {
             "overall_score": overall_score,
             "content_score": round(average_content_score, 1),
@@ -1009,6 +1036,13 @@ class InterviewService:
             "confidence_label": "Measured + evidence-linked" if questions_review else "Awaiting answers",
             "strengths": list(dict.fromkeys(strengths))[:3],
             "top_habits": top_habits,
+            "confidence_trend": confidence_points,
+            "crumble_point": crumble_point,
+            "privacy_note": {
+                "processing": "Browser WebRTC/MediaRecorder audio and camera frames are processed ephemerally.",
+                "storage": "Raw media artifacts are persisted in secure, encrypted storage (Supabase / Local).",
+                "retention": "Audio/video recordings can be purged anytime on request or automatically post-session.",
+            },
             "evidence_events": [e.model_dump() for e in sorted_events],
             "competency_coverage": competency_coverage,
             "delivery": {

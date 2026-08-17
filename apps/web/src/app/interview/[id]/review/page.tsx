@@ -332,6 +332,39 @@ export default function InterviewReviewPage() {
                 ))}
               </div>
             </div>
+
+            {/* Confidence-Trend Detection Card (Where Candidate Crumbled) */}
+            <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/[0.15] p-5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Flame className="h-4 w-4 text-amber-400" />
+                Confidence-Trend & Crumble Point
+              </div>
+              {report?.crumble_point ? (
+                <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-950/30 p-3.5 text-xs">
+                  <span className="font-bold text-rose-300 block mb-1">
+                    ⚠️ Crumble Point Detected (Question {report.crumble_point.question_number})
+                  </span>
+                  <p className="text-slate-300 leading-relaxed">{report.crumble_point.note}</p>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-slate-400 leading-relaxed">
+                  Consistent performance across turns. No severe confidence collapse was detected during this session.
+                </p>
+              )}
+            </div>
+
+            {/* Privacy & Data Handling Note */}
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-950/[0.15] p-5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                Privacy & Security Guarantee
+              </div>
+              <div className="mt-3 space-y-2 text-xs text-slate-300">
+                <p><span className="font-bold text-emerald-300">Processing:</span> WebRTC and MediaRecorder streams are processed ephemerally.</p>
+                <p><span className="font-bold text-emerald-300">Storage:</span> Saved in encrypted object storage strictly under candidate UUID.</p>
+                <p><span className="font-bold text-emerald-300">Retention:</span> Can be deleted anytime on candidate request or auto-purged post-session.</p>
+              </div>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6">
