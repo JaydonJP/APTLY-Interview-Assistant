@@ -168,13 +168,19 @@ class InterviewService:
         self.db.add(interview)
         await self.db.flush()
 
-        # 3. Generate Questions
+        # 3. Retrieve Interview Twin coaching history to inform generation
+        from app.services.interview_twin_service import InterviewTwinService
+        twin_service = InterviewTwinService()
+        twin_profile = await twin_service.get_twin_profile(self.db)
+
+        # Generate Questions informed by previous sessions
         questions = await self.question_generator.generate_questions(
             interview_id=interview.id,
             role_profile=role_profile,
             interview_type=interview_type,
             difficulty_level=difficulty_level,
             question_count=question_count,
+            twin_profile=twin_profile,
         )
         for q in questions:
             self.db.add(q)

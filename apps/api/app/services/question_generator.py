@@ -35,9 +35,11 @@ class QuestionGeneratorService:
         interview_type: str = "mixed",
         difficulty_level: str = "medium",
         question_count: int = 3,
+        twin_profile: Any | None = None,
     ) -> list[Question]:
         """
-        Generate structured Question ORM entities for an interview session.
+        Generate structured Question ORM entities for an interview session,
+        incorporating previous session weaknesses and coaching history from the Interview Twin.
         """
         logger.info(
             "question_generation_started",
@@ -45,6 +47,7 @@ class QuestionGeneratorService:
             role_title=role_profile.role_title,
             count=question_count,
             type=interview_type,
+            has_twin_context=bool(twin_profile),
         )
 
         schema = {
@@ -72,9 +75,21 @@ class QuestionGeneratorService:
             f"- Technical Skills: {', '.join(role_profile.technical_skills)}\n"
             f"- Tools: {', '.join(role_profile.tools)}\n"
             f"- Responsibilities: {', '.join(role_profile.responsibilities[:2])}\n"
-            f"- Focus Topics: {', '.join(role_profile.interview_topics[:3])}\n\n"
-            f"Generate exactly {question_count} distinct questions."
+            f"- Focus Topics: {', '.join(role_profile.interview_topics[:3])}\n"
         )
+
+        # Inject Interview Twin coaching history if available
+        if twin_profile and hasattr(twin_profile, "recurring_weaknesses") and twin_profile.recurring_weaknesses:
+            weak_str = ", ".join(str(w) for w in twin_profile.recurring_weaknesses[:3])
+            focus_str = ", ".join(str(f) for f in getattr(twin_profile, "next_interview_focus_areas", [])[:2])
+            user_prompt += (
+                f"\nCandidate Coaching History (Interview Twin):\n"
+                f"- Previous Weaknesses Identified: {weak_str}\n"
+                f"- Focus Growth Areas: {focus_str}\n"
+                f"Ensure at least one technical question deliberately challenges these previous weaknesses (e.g. testing validation, empirical benchmarks, or architectural trade-offs).\n"
+            )
+
+        user_prompt += f"\nGenerate exactly {question_count} distinct questions."
 
         raw_result = await self.llm_provider.generate_structured(
             LLMStructuredRequest(
@@ -91,6 +106,7 @@ class QuestionGeneratorService:
             interview_type=interview_type,
             difficulty_level=difficulty_level,
             question_count=question_count,
+            twin_profile=twin_profile,
         )
 
         questions: list[Question] = []
@@ -123,9 +139,11 @@ class QuestionGeneratorService:
         interview_type: str,
         difficulty_level: str,
         question_count: int,
+        twin_profile: Any | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Parses LLM output or generates high-quality deterministic mock questions.
+        Parses LLM output or generates high-quality deterministic mock questions,
+        tailored to the candidate's coaching history from the Interview Twin.
         """
         if (
             "questions" in raw_result
@@ -172,7 +190,35 @@ class QuestionGeneratorService:
             else "PostgreSQL"
         )
 
-        templates: list[dict[str, Any]] = [
+        templates: list[dict[str, Any]] = []
+
+        # If Twin history indicates validation or tradeoff weakness, inject targeted questions
+        weaknesses_flat = (
+            " ".join(str(w) for w in getattr(twin_profile, "recurring_weaknesses", [])).lower()
+            if twin_profile
+            else ""
+        )
+
+        if "validation" in weaknesses_flat:
+            templates.append(
+                {
+                    "category": "technical",
+                    "question_type": "scenario",
+                    "competency": f"{primary_skill} Validation & Benchmarking",
+                    "difficulty": difficulty_level,
+                    "question_text": (
+                        f"When architecting a production system in {primary_skill}, how do you empirically validate performance claims "
+                        f"and test baseline constraints using load benchmarks, canary telemetry, or A/B testing before rollout?"
+                    ),
+                    "expected_topics": [
+                        "Empirical load testing and benchmarking",
+                        "Canary deployments and telemetry verification",
+                        "Baseline metric comparison",
+                    ],
+                }
+            )
+
+        templates.extend([
             {
                 "category": "technical",
                 "question_type": "scenario",
@@ -252,7 +298,7 @@ class QuestionGeneratorService:
                     "Pragmatic compromise and team velocity alignment",
                 ],
             },
-        ]
+        ])
 
         # Filter by interview_type if specific
         if interview_type == "technical":

@@ -7,12 +7,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { BarChart2, History, Home, PlusCircle, ShieldCheck } from "lucide-react";
+import { BarChart2, Cpu, History, Home, PlusCircle, ShieldCheck } from "lucide-react";
 import { UserMenu } from "@/components/auth/UserMenu";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/interview/new", label: "New Interview", icon: PlusCircle },
+  { href: "/twin", label: "Twin", icon: Cpu },
   { href: "/history", label: "History", icon: History },
   { href: "/progress", label: "Progress", icon: BarChart2 },
 ];
