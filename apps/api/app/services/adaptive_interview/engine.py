@@ -37,12 +37,15 @@ CRITICAL RULES:
 """
 
 
+from app.schemas.pressure_engine import PressureAction, PressureLevel
+from app.services.adaptive_interview.pressure_engine import PressureEngineService
 from app.services.session_memory.service import SessionMemoryService
 
 
 class GeminiAdaptiveEngine:
     """
-    Orchestrates adaptive follow-up evaluation and generation with Google Gemini and Session Memory.
+    Orchestrates adaptive follow-up evaluation and generation with Google Gemini,
+    Session Memory, and Pressure-Aware difficulty modulation (Levels 1 to 6).
     """
 
     def __init__(
@@ -50,10 +53,12 @@ class GeminiAdaptiveEngine:
         llm_provider: LLMProvider,
         decision_service: FollowUpDecisionService | None = None,
         memory_service: SessionMemoryService | None = None,
+        pressure_engine: PressureEngineService | None = None,
     ) -> None:
         self.llm_provider = llm_provider
         self.decision_service = decision_service or FollowUpDecisionService()
         self.memory_service = memory_service or SessionMemoryService()
+        self.pressure_engine = pressure_engine or PressureEngineService()
 
     async def maybe_generate_followup(
         self,
@@ -96,6 +101,19 @@ class GeminiAdaptiveEngine:
             content_metrics=content_metrics,
         )
 
+        # 4. Evaluate adaptive pressure level (1 Warmup -> 6 Pressure Test)
+        current_lvl = 1
+        if parent_question.difficulty and parent_question.difficulty.isdigit():
+            current_lvl = int(parent_question.difficulty)
+        elif parent_question.follow_up_depth > 0:
+            current_lvl = min(6, parent_question.follow_up_depth + 1)
+
+        pressure_decision = self.pressure_engine.evaluate_pressure(
+            current_level=current_lvl,
+            content_metrics=content_metrics,
+            transcript=candidate_transcript,
+        )
+
         # If contradiction found, override decision to probe consistency
         if contradictions:
             top_contra = contradictions[0]
@@ -103,6 +121,11 @@ class GeminiAdaptiveEngine:
             decision.reason = FollowUpReason.CLAIM_REQUIRES_CLARIFICATION
             decision.justification = f"Consistency check: {top_contra.suggested_probe}"
             decision.context_quote = top_contra.second_statement
+
+        # If candidate is in severe distress, provide recovery follow-up
+        elif pressure_decision.action == PressureAction.RECOVER:
+            decision.should_follow_up = True
+            decision.justification = "Candidate recovery: stepping back to foundational architecture."
 
         if not decision.should_follow_up:
             logger.info(
@@ -117,10 +140,15 @@ class GeminiAdaptiveEngine:
         domain = role_context.get("domain", "Engineering") if role_context else "Engineering"
         memory_context = self.memory_service.format_memory_for_prompt(relevant_memories)
 
+        lvl_enum = PressureLevel(int(pressure_decision.next_level))
+        action_enum = str(pressure_decision.action if str(pressure_decision.action) != "advance" else decision.followup_action)
+
         prompt = f"""### INTERVIEW CONTEXT
 - Target Role: {role_title} ({domain})
 - Parent Question Asked: "{parent_question.question_text}"
 - Question Competency: {parent_question.competency}
+- Pressure Level: {lvl_enum.value} ({lvl_enum.label})
+- Pressure Directive: {pressure_decision.suggested_prompt_directive}
 
 ### CANDIDATE'S ACTUAL SPOKEN ANSWER
 \"\"\"{candidate_transcript}\"\"\"
@@ -128,19 +156,23 @@ class GeminiAdaptiveEngine:
 {memory_context}
 
 ### FOLLOW-UP OBJECTIVE
-- Action: {str(decision.followup_action)}
+- Action: {action_enum}
 - Reason: {str(decision.reason)}
 - Focus: {decision.justification}
 {f'- Missing Evidence: {", ".join(decision.missing_evidence)}' if decision.missing_evidence else ''}
 {f'- Context Anchor Quote: "{decision.context_quote}"' if decision.context_quote else ''}
 
-Generate exactly ONE grounded follow-up question probing this point. Reference the candidate's quote and ask for the missing evidence. Never use generic phrases like 'Tell me more'.
+Generate exactly ONE grounded follow-up question probing this point at Pressure Level {lvl_enum.value}. Never make the tone hostile or abusive. Never use generic phrases like 'Tell me more'.
 """
 
         follow_up_text: str | None = None
 
         if contradictions:
             follow_up_text = contradictions[0].suggested_probe
+        elif str(pressure_decision.action) == "recover":
+            follow_up_text = "Let's step back: how would you structure the foundational components and trade-offs before diving into optimizations?"
+        elif str(pressure_decision.action) == "edge_case":
+            follow_up_text = "Under a partial network partition or sudden 10x traffic spike, what failure modes would you expect and how would the system fail safely?"
         else:
             try:
                 req = LLMGenerateRequest(
@@ -153,15 +185,15 @@ Generate exactly ONE grounded follow-up question probing this point. Reference t
                 follow_up_text = resp.text.strip().replace('"', '')
             except Exception as exc:
                 logger.warning("adaptive_followup_llm_failed_falling_back", error=str(exc))
-            # Resilient fallback: Synthesize grounded deterministic follow-up from quote & action
-            if decision.context_quote:
-                action_str = str(decision.followup_action)
-                if action_str == "QUANTIFY":
-                    follow_up_text = f"What was the initial baseline and how did you measure the results when you mentioned '{decision.context_quote}'?"
-                elif action_str == "CLARIFY":
-                    follow_up_text = f"Regarding '{decision.context_quote}', what was your specific individual contribution?"
-                else:
-                    follow_up_text = f"Could you walk through how you validated the outcome for '{decision.context_quote}'?"
+                # Resilient fallback: Synthesize grounded deterministic follow-up from quote & action
+                if decision.context_quote:
+                    action_str = str(decision.followup_action)
+                    if action_str == "QUANTIFY":
+                        follow_up_text = f"What was the initial baseline and how did you measure the results when you mentioned '{decision.context_quote}'?"
+                    elif action_str == "CLARIFY":
+                        follow_up_text = f"Regarding '{decision.context_quote}', what was your specific individual contribution?"
+                    else:
+                        follow_up_text = f"Could you walk through how you validated the outcome for '{decision.context_quote}'?"
 
         if not follow_up_text:
             return None
@@ -174,11 +206,11 @@ Generate exactly ONE grounded follow-up question probing this point. Reference t
                 sequence_number=parent_question.sequence_number,
                 category=parent_question.category,
                 question_type="follow_up",
-                competency=decision.target_competency,
-                difficulty=parent_question.difficulty,
+                competency=f"{parent_question.competency} (Level {lvl_enum.value}: {lvl_enum.label})",
+                difficulty=str(lvl_enum.value),
                 question_text=follow_up_text,
                 expected_topics=[str(decision.reason)],
-                prompt_version="gemini_adaptive_v2",
+                prompt_version="gemini_adaptive_pressure_v2",
                 parent_question_id=parent_question.id,
                 root_question_id=root_id,
                 question_source="follow_up",
