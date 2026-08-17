@@ -88,26 +88,14 @@ async def get_db(
     The session is automatically committed on success
     and rolled back on exception.
     """
-    try:
-        session_factory = get_session_factory(settings.database_url)
-        async with session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-    except Exception as exc:
-        # If pooler/remote connection fails, seamlessly use local SQLite session
-        logger.debug("db_session_fallback", error=str(exc))
-        fallback_factory = get_session_factory("sqlite+aiosqlite:///./aptly.db")
-        async with fallback_factory() as fb_session:
-            try:
-                yield fb_session
-                await fb_session.commit()
-            except Exception:
-                await fb_session.rollback()
-                raise
+    session_factory = get_session_factory(settings.database_url)
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # ── Storage Provider ──────────────────────────────────────────────────────────

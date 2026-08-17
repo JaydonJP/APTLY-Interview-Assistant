@@ -41,7 +41,13 @@ class Settings(BaseSettings):
     # ── API ────────────────────────────────────────────────────
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = Field(
-        default=["http://localhost:3000", "http://127.0.0.1:3000"]
+        default=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://[::1]:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ]
     )
 
     # ── Security ───────────────────────────────────────────────
