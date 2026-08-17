@@ -3,7 +3,7 @@
  *
  * Thin fetch wrapper that:
  * - Uses base URL from environment
- * - Forwards X-Request-ID
+ * - Forwards X-Request-ID and X-Candidate-ID for session privacy
  * - Parses standard error responses
  * - Provides typed helpers for GET/POST/PUT/DELETE
  */
@@ -23,6 +23,23 @@ export function getMediaUrl(storageKey: string): string {
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/")}`;
+}
+
+/**
+ * Gets or initializes a persistent client session candidate ID for guest privacy.
+ */
+export function getCandidateId(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    let id = localStorage.getItem("aptly_candidate_id");
+    if (!id) {
+      id = `cand_${crypto.randomUUID()}`;
+      localStorage.setItem("aptly_candidate_id", id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
 }
 
 export class ApiError extends Error {
@@ -68,7 +85,7 @@ async function parseErrorResponse(
       }
     }
   } catch {
-    // Fallback to response status text
+    // Fallback
   }
   return {
     code: `HTTP_${response.status || "UNKNOWN"}`,
@@ -85,7 +102,6 @@ interface RequestOptions extends RequestInit {
 async function getAuthHeader(): Promise<string | null> {
   try {
     const sessionPromise = supabase.auth.getSession();
-    // Race against a 1-second timeout so Supabase never blocks API calls
     const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
     const result = await Promise.race([sessionPromise, timeoutPromise]);
     if (result && typeof result === "object" && "data" in result) {
@@ -93,7 +109,7 @@ async function getAuthHeader(): Promise<string | null> {
       if (token) return `Bearer ${token}`;
     }
   } catch {
-    // Ignore Supabase errors — API works without auth in dev/mock mode
+    // Ignore Supabase errors
   }
   return null;
 }
@@ -108,6 +124,11 @@ async function request<T>(
   headers.set("Content-Type", "application/json");
   if (requestId) {
     headers.set("X-Request-ID", requestId);
+  }
+
+  const candidateId = getCandidateId();
+  if (candidateId) {
+    headers.set("X-Candidate-ID", candidateId);
   }
 
   const authHeader = token ? `Bearer ${token}` : await getAuthHeader();
@@ -130,7 +151,6 @@ async function request<T>(
     );
   }
 
-  // 204 No Content
   if (response.status === 204) {
     return undefined as T;
   }
@@ -161,6 +181,10 @@ export const apiClient = {
 
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
     const headers = new Headers();
+    const candidateId = getCandidateId();
+    if (candidateId) {
+      headers.set("X-Candidate-ID", candidateId);
+    }
     const authHeader = await getAuthHeader();
     if (authHeader) {
       headers.set("Authorization", authHeader);
@@ -185,4 +209,3 @@ export const apiClient = {
     return response.json() as Promise<T>;
   },
 };
-

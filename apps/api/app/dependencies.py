@@ -266,10 +266,12 @@ security_bearer = HTTPBearer(auto_error=False)
 async def get_optional_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)] = None,
     authorization: Annotated[str | None, Header()] = None,
+    x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
+    x_candidate_id: Annotated[str | None, Header(alias="X-Candidate-ID")] = None,
 ) -> AuthenticatedUser | None:
     """
-    FastAPI dependency: returns the authenticated user if Bearer token is provided,
-    otherwise None. Does not raise 401.
+    FastAPI dependency: returns the authenticated user if Bearer token or client session
+    header (X-User-ID / X-Candidate-ID) is provided, ensuring session isolation.
     """
     token = None
     if credentials:
@@ -277,10 +279,22 @@ async def get_optional_current_user(
     elif authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
 
-    if not token:
-        return None
+    if token:
+        user = decode_supabase_token(token)
+        if user:
+            return user
 
-    return decode_supabase_token(token)
+    # Fallback to client session header for isolated practice sessions
+    client_id = x_user_id or x_candidate_id
+    if client_id and len(client_id.strip()) > 3:
+        return AuthenticatedUser(
+            id=client_id.strip(),
+            email=None,
+            role="guest",
+            metadata={},
+        )
+
+    return None
 
 
 async def get_current_user(

@@ -111,6 +111,7 @@ async def create_interview(
 async def get_interview(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewDetailResponse:
     """Retrieve full interview details."""
     detail = await service.get_interview_detail(interview_id)
@@ -122,6 +123,17 @@ async def get_interview(
                 "message": f"Interview '{interview_id}' not found.",
             },
         )
+
+    # Privacy Check: Enforce user ownership if interview is user-bound
+    if detail.user_id and user and detail.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "You do not have permission to view this private interview session.",
+            },
+        )
+
     return _to_detail_response(detail)
 
 
@@ -262,8 +274,28 @@ async def finish_interview(
 async def get_interview_review(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewReviewResponse:
     """Retrieve post-interview review data."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "INTERVIEW_NOT_FOUND",
+                "message": f"Interview '{interview_id}' not found.",
+            },
+        )
+
+    if detail.user_id and user and detail.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "You do not have permission to view this private review report.",
+            },
+        )
+
     review = await service.compile_review(interview_id)
     return InterviewReviewResponse(**review)
 

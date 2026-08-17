@@ -205,9 +205,13 @@ class InterviewService:
     async def list_interviews(
         self, user_id: str | None = None, limit: int = 50
     ) -> list[Interview]:
-        """Fetch list of interviews, optionally filtered by user_id."""
+        """Fetch list of interviews strictly owned by the specified user_id."""
+        if not user_id:
+            return []
+
         stmt = (
             select(Interview)
+            .where(Interview.user_id == user_id)
             .options(
                 selectinload(Interview.role_profile),
                 selectinload(Interview.questions),
@@ -216,8 +220,6 @@ class InterviewService:
             .order_by(Interview.created_at.desc())
             .limit(limit)
         )
-        if user_id:
-            stmt = stmt.where(Interview.user_id == user_id)
 
         res = await self.db.execute(stmt)
         return list(res.scalars().all())

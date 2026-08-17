@@ -41,20 +41,22 @@ class InterviewTwinService:
     def __init__(self, dna_service: AnswerDNAService | None = None) -> None:
         self.dna_service = dna_service or AnswerDNAService()
 
-    async def get_twin_profile(self, db: AsyncSession) -> InterviewTwinProfile:
+    async def get_twin_profile(
+        self, db: AsyncSession, user_id: str | None = None
+    ) -> InterviewTwinProfile:
         """
-        Builds the Interview Twin coaching profile from all actual completed sessions in the DB.
+        Builds the Interview Twin coaching profile from completed sessions.
+        If user_id is provided, filters strictly to that user's private sessions.
         """
-        # Query all completed interviews sorted by completion time
-        stmt = (
-            select(Interview)
-            .where(Interview.status == "completed")
-            .options(
-                selectinload(Interview.questions),
-                selectinload(Interview.answers),
-            )
-            .order_by(Interview.completed_at.asc(), Interview.created_at.asc())
-        )
+        stmt = select(Interview).where(Interview.status == "completed")
+        if user_id:
+            stmt = stmt.where(Interview.user_id == user_id)
+
+        stmt = stmt.options(
+            selectinload(Interview.questions),
+            selectinload(Interview.answers),
+        ).order_by(Interview.completed_at.asc(), Interview.created_at.asc())
+
         result = await db.execute(stmt)
         completed_interviews = list(result.scalars().all())
 
