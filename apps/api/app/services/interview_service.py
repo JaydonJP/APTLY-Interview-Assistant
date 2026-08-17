@@ -576,6 +576,7 @@ class InterviewService:
         total_duration_seconds: float,
         total_fillers: int,
         total_pauses: int,
+        competency_coverage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Assemble the evidence-first report card with universal EvidenceEvent contracts.
 
@@ -927,6 +928,7 @@ class InterviewService:
             "strengths": list(dict.fromkeys(strengths))[:3],
             "top_habits": top_habits,
             "evidence_events": [e.model_dump() for e in sorted_events],
+            "competency_coverage": competency_coverage,
             "delivery": {
                 "score": delivery_score,
                 "pace_label": (
@@ -1104,6 +1106,18 @@ class InterviewService:
                         "created_at": cm.created_at,
                     }
 
+            # Extract Answer DNA (Technical or Behavioral)
+            from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+
+            dna_service = AnswerDNAService()
+            transcript_text = (item.get("transcript") or {}).get("full_text") or ""
+            if str(q.category).lower() == "behavioral":
+                item["behavioral_dna"] = dna_service.extract_behavioral_dna(transcript_text).model_dump()
+                item["technical_dna"] = None
+            else:
+                item["technical_dna"] = dna_service.extract_technical_dna(transcript_text).model_dump()
+                item["behavioral_dna"] = None
+
             questions_review.append(item)
 
         avg_wpm = round(sum(wpm_list) / len(wpm_list), 1) if wpm_list else 0.0
@@ -1125,6 +1139,35 @@ class InterviewService:
             if tech_depth_scores_list
             else 0.0
         )
+
+        # Collect target competencies from role profile or question competencies
+        target_competencies: list[str] = []
+        if interview.role_profile:
+            if interview.role_profile.behavioral_competencies:
+                target_competencies.extend(interview.role_profile.behavioral_competencies)
+            if interview.role_profile.technical_skills:
+                target_competencies.extend(interview.role_profile.technical_skills)
+
+        if not target_competencies:
+            for q in interview.questions:
+                if q.competency:
+                    clean_comp = q.competency.split(" (")[0].strip()
+                    if clean_comp:
+                        target_competencies.append(clean_comp)
+
+        if not target_competencies:
+            target_competencies = ["Problem Solving", "System Architecture", "Communication", "Technical Depth"]
+
+        target_competencies = list(dict.fromkeys(target_competencies))
+
+        from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+        dna_service = AnswerDNAService()
+        competency_coverage = dna_service.evaluate_session_competencies(
+            interview_id=str(interview.id),
+            target_competencies=target_competencies,
+            questions_with_answers=questions_review,
+        ).model_dump()
+
         report_card = self._build_report_card(
             session_id=str(interview.id),
             questions_review=questions_review,
@@ -1133,6 +1176,7 @@ class InterviewService:
             total_duration_seconds=total_duration,
             total_fillers=total_fillers,
             total_pauses=total_pauses,
+            competency_coverage=competency_coverage,
         )
 
         return {

@@ -27,6 +27,8 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { EvidenceTimeline } from "@/components/evidence/EvidenceTimeline";
 import { RepairModeModal } from "@/components/repair/RepairModeModal";
+import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
+import { CompetencyCoverageMatrix } from "@/components/dna/CompetencyCoverageMatrix";
 import type {
   ContentMetrics,
   EvidenceEvent,
@@ -470,6 +472,16 @@ export default function InterviewReviewPage() {
             </div>
           </div>
         </section>
+
+        {/* Job Competency Coverage Matrix */}
+        <CompetencyCoverageMatrix coverage={report?.competency_coverage} />
+
+        {/* Answer DNA Breakdown */}
+        <AnswerDNACard
+          category={currentItem?.question.category ?? "technical"}
+          technicalDna={currentItem?.technical_dna}
+          behavioralDna={currentItem?.behavioral_dna}
+        />
 
         {/* Transcript & Content Feedback */}
         <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]">

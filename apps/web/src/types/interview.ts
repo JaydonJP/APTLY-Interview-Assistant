@@ -265,7 +265,19 @@ export interface InterviewReview {
 }
 
 import type { EvidenceEvent } from "./evidence";
+import type { BehavioralAnswerDNA, SessionCompetencyCoverage, TechnicalAnswerDNA } from "./dna";
 export * from "./evidence";
+export * from "./dna";
+
+export interface QuestionReviewItem {
+  question: Question;
+  answer?: Answer | null;
+  transcript?: Transcript | null;
+  speech_metrics?: SpeechMetrics | null;
+  content_metrics?: ContentMetrics | null;
+  technical_dna?: TechnicalAnswerDNA | null;
+  behavioral_dna?: BehavioralAnswerDNA | null;
+}
 
 export interface ReportHabit {
   id: string;
@@ -299,6 +311,7 @@ export interface InterviewReportCard {
   strengths: string[];
   top_habits: ReportHabit[];
   evidence_events: EvidenceEvent[];
+  competency_coverage?: SessionCompetencyCoverage | null;
   delivery: DeliveryOverview;
   recommended_repair_question?: number | null;
   next_session_focus: string;

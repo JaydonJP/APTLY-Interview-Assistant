@@ -198,6 +198,14 @@ class InterviewDetailResponse(InterviewResponse):
 # ── Post-Interview Review Schemas ─────────────────────────────────────────────
 
 
+from app.schemas.answer_dna import (
+    BehavioralAnswerDNA,
+    SessionCompetencyCoverage,
+    TechnicalAnswerDNA,
+)
+from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+
+
 class QuestionReviewItem(AptlyBaseModel):
     """Detailed review of an individual question and answer."""
 
@@ -206,9 +214,8 @@ class QuestionReviewItem(AptlyBaseModel):
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
     content_metrics: ContentMetricsResponse | None = None
-
-
-from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+    technical_dna: TechnicalAnswerDNA | None = None
+    behavioral_dna: BehavioralAnswerDNA | None = None
 
 
 class ReportHabit(AptlyBaseModel):
@@ -252,6 +259,7 @@ class InterviewReportCard(AptlyBaseModel):
     strengths: list[str] = Field(default_factory=list)
     top_habits: list[ReportHabit] = Field(default_factory=list)
     evidence_events: list[EvidenceEvent] = Field(default_factory=list)
+    competency_coverage: SessionCompetencyCoverage | None = None
     delivery: DeliveryOverview
     recommended_repair_question: int | None = None
     next_session_focus: str
