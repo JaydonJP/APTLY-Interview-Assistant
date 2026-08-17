@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.models.content_metrics import ContentMetrics
 from app.schemas.content_intelligence import (
+    AnswerCorrectness,
     ContentAnalysisInput,
     ContentAnalysisResult,
     FeedbackItem,
@@ -85,6 +86,23 @@ class ContentAnalysisService:
             structure_score=10.0 if not is_empty else 0.0,
             evidence_score=0.0,
             overall_content_score=5.0 if not is_empty else 0.0,
+            correctness_status=(
+                AnswerCorrectness.NOT_ENOUGH_EVIDENCE
+                if is_empty
+                else AnswerCorrectness.PARTIALLY_CORRECT
+            ),
+            correctness_score=0.0 if is_empty else 10.0,
+            correctness_summary=(
+                "There was not enough spoken evidence to judge correctness."
+                if is_empty
+                else "The answer was too short to verify the key ideas required by the question."
+            ),
+            topic_coverage=[],
+            ideal_answer_outline=[
+                "State the direct answer first.",
+                "Explain the mechanism or reasoning.",
+                "Give one concrete example or result.",
+            ],
             strengths=[],
             weaknesses=["Answer was too short to demonstrate competency."],
             star_analysis=(
@@ -213,6 +231,11 @@ class ContentAnalysisService:
             existing.structure_score = result.structure_score
             existing.evidence_score = result.evidence_score
             existing.overall_content_score = result.overall_content_score
+            existing.correctness_status = result.correctness_status.value
+            existing.correctness_score = result.correctness_score
+            existing.correctness_summary = result.correctness_summary
+            existing.topic_coverage_json = [t.model_dump() for t in result.topic_coverage]
+            existing.ideal_answer_outline_json = result.ideal_answer_outline
             existing.strengths_json = result.strengths
             existing.weaknesses_json = result.weaknesses
             existing.star_analysis_json = star_dict
@@ -237,6 +260,11 @@ class ContentAnalysisService:
             structure_score=result.structure_score,
             evidence_score=result.evidence_score,
             overall_content_score=result.overall_content_score,
+            correctness_status=result.correctness_status.value,
+            correctness_score=result.correctness_score,
+            correctness_summary=result.correctness_summary,
+            topic_coverage_json=[t.model_dump() for t in result.topic_coverage],
+            ideal_answer_outline_json=result.ideal_answer_outline,
             strengths_json=result.strengths,
             weaknesses_json=result.weaknesses,
             star_analysis_json=star_dict,

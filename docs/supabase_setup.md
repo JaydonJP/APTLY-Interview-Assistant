@@ -2,6 +2,8 @@
 
 This guide walks you through connecting your Supabase project (PostgreSQL database & Object Storage) to APTLY.
 
+APTLY is configured for Supabase-backed runtime storage. Audio uploads, recordings, and generated media are kept in the private `aptly-media` bucket; the local filesystem provider is retained only for automated tests. The API also stores interviews, answer analysis, learner progress, and the knowledge graph in Supabase PostgreSQL.
+
 ---
 
 ## 1. Create a Supabase Project
@@ -82,7 +84,13 @@ This will automatically create all tables in your Supabase PostgreSQL database:
 - `answers`
 - `transcripts`
 - `speech_metrics`
+- `content_metrics` (delivery, correctness, topic coverage, and ideal-answer outline)
+- `knowledge_topics` (normalized concepts encountered in answers)
+- `knowledge_edges` (co-occurrence relationships between concepts)
+- `learner_topic_progress` (per-learner attempts, correctness, mastery, and recency)
 - `alembic_version`
+
+Migration `005_analysis_progress_knowledge_graph` adds the learner identity and analysis fields. The default UI uses an anonymous browser-generated learner ID until authentication is added, so progress is separated per browser without storing identity data in the frontend filesystem.
 
 ---
 
@@ -103,3 +111,17 @@ npm run dev
 Open [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health) to verify:
 - `postgresql`: `ok` (Connected to Supabase PostgreSQL)
 - `storage_provider (supabase)`: `ok`
+
+On startup the API also verifies that `aptly-media` exists and is private. If it does not exist, the backend creates it through the Supabase Storage API using the service-role key.
+
+## 7. Runtime behavior
+
+During an interview, Gemini Flash generates and evaluates questions, detects when a short answer needs a follow-up, and can explain a learner's doubt using the current question as context. After each answer, APTLY records:
+
+- correctness (`correct`, `partially_correct`, `incorrect`, or `not_enough_evidence`)
+- a correctness score and explanation
+- which expected topics were covered or missed
+- an ideal answer outline for review
+- topic mastery updates and graph connections
+
+The review page exposes those details rather than only WPM and pause metrics. The Progress page uses the stored mastery history to recommend easy, medium, or hard interviews. Narration is generated server-side with Gemini Flash TTS, so the browser never receives the Gemini API key; browser speech synthesis remains only as a graceful fallback if the TTS request fails.

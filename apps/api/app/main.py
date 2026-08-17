@@ -119,9 +119,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             error=str(exc)[:300],
         )
         raise RuntimeError(
-            "PostgreSQL is unavailable. Start `docker compose up -d postgres` "
-            "or set DATABASE_URL to a reachable PostgreSQL instance."
+            "Supabase PostgreSQL is unavailable. Set DATABASE_URL to a reachable "
+            "Supabase PostgreSQL connection string before starting APTLY."
         ) from exc
+
+    # Storage is intentionally remote-only in the runtime configuration. A
+    # private bucket is checked/created before the API accepts recordings.
+    if settings.storage_provider == "supabase":
+        from app.dependencies import _get_storage_provider_instance
+
+        storage = _get_storage_provider_instance(
+            settings.storage_provider,
+            settings.storage_endpoint,
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+            settings.storage_bucket,
+        )
+        await storage.ensure_private_bucket()  # type: ignore[attr-defined]
 
     yield  # Application is running
 

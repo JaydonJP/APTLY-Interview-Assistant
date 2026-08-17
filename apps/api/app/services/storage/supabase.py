@@ -33,6 +33,46 @@ class SupabaseStorageProvider(StorageProvider):
         self.bucket_name = bucket_name
         self.base_api_url = f"{self.supabase_url}/storage/v1"
 
+        if not self.supabase_url or not self.service_role_key:
+            raise StorageError(
+                "Supabase Storage is required but SUPABASE_URL or "
+                "SUPABASE_SERVICE_ROLE_KEY is missing."
+            )
+
+    async def ensure_private_bucket(self) -> None:
+        """Verify the configured private bucket, creating it when absent."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_api_url}/bucket/{self.bucket_name}",
+                    headers=self._get_headers(),
+                )
+                if response.status_code == 404:
+                    create_response = await client.post(
+                        f"{self.base_api_url}/bucket",
+                        json={
+                            "id": self.bucket_name,
+                            "name": self.bucket_name,
+                            "public": False,
+                        },
+                        headers=self._get_headers("application/json"),
+                    )
+                    create_response.raise_for_status()
+                else:
+                    response.raise_for_status()
+                    bucket = response.json()
+                    if bucket.get("public") is True:
+                        private_response = await client.put(
+                            f"{self.base_api_url}/bucket/{self.bucket_name}",
+                            json={"public": False},
+                            headers=self._get_headers("application/json"),
+                        )
+                        private_response.raise_for_status()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise StorageError(
+                f"Supabase bucket '{self.bucket_name}' is unavailable."
+            ) from exc
+
     def _get_headers(self, content_type: str | None = None) -> dict[str, str]:
         headers = {
             "Authorization": f"Bearer {self.service_role_key}",

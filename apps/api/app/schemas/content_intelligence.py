@@ -38,6 +38,15 @@ class ClaimSupportStatus(StrEnum):
     NOT_ASSESSABLE = "NOT_ASSESSABLE"
 
 
+class AnswerCorrectness(StrEnum):
+    """How completely the answer addressed the question's technical bar."""
+
+    CORRECT = "correct"
+    PARTIALLY_CORRECT = "partially_correct"
+    INCORRECT = "incorrect"
+    NOT_ENOUGH_EVIDENCE = "not_enough_evidence"
+
+
 class EvidenceType(StrEnum):
     """Types of evidence anchored to candidate speech."""
 
@@ -127,6 +136,19 @@ class PracticeDrill(BaseModel):
     repeat_count: int = Field(default=3, description="Recommended repetition count")
 
 
+class TopicCoverage(BaseModel):
+    """Question topic coverage used by feedback and the knowledge graph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    topic: str = Field(..., min_length=1, max_length=160)
+    covered: bool = False
+    score: float = Field(default=0.0, ge=0.0, le=100.0)
+    evidence_quote: str | None = None
+    explanation: str = ""
+    importance: str = "core"
+
+
 class ContentAnalysisResult(BaseModel):
     """
     Validated structured output from the Content Intelligence AI evaluator.
@@ -141,6 +163,11 @@ class ContentAnalysisResult(BaseModel):
     structure_score: float = Field(..., ge=0.0, le=100.0, description="Structure & clarity 0-100")
     evidence_score: float = Field(..., ge=0.0, le=100.0, description="Evidence quality 0-100")
     overall_content_score: float = Field(..., ge=0.0, le=100.0, description="Weighted aggregate 0-100")
+    correctness_status: AnswerCorrectness = AnswerCorrectness.NOT_ENOUGH_EVIDENCE
+    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    correctness_summary: str = ""
+    topic_coverage: list[TopicCoverage] = Field(default_factory=list)
+    ideal_answer_outline: list[str] = Field(default_factory=list)
 
     strengths: list[str] = Field(default_factory=list, description="Top positive aspects of answer")
     weaknesses: list[str] = Field(default_factory=list, description="Top prioritized weaknesses")

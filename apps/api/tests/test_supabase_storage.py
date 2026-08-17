@@ -89,3 +89,26 @@ async def test_supabase_storage_presigned_url_mocked(monkeypatch, supabase_stora
     presigned = await supabase_storage.generate_presigned_url("raw_audio/test.webm", expires_in_seconds=1800)
     assert "token=xyz" in presigned.url
     assert presigned.storage_key == "raw_audio/test.webm"
+
+
+@pytest.mark.asyncio
+async def test_supabase_storage_enforces_private_bucket(monkeypatch, supabase_storage):
+    calls: list[str] = []
+
+    async def mock_get(self, url, headers=None):
+        req = httpx.Request("GET", url)
+        return httpx.Response(200, json={"id": "aptly-media", "public": True}, request=req)
+
+    async def mock_put(self, url, json=None, headers=None):
+        calls.append(url)
+        req = httpx.Request("PUT", url)
+        return httpx.Response(200, json={"public": False}, request=req)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr(httpx.AsyncClient, "put", mock_put)
+
+    await supabase_storage.ensure_private_bucket()
+
+    assert calls == [
+        "https://testproject.supabase.co/storage/v1/bucket/aptly-media"
+    ]

@@ -12,11 +12,13 @@ from pydantic import Field
 
 from app.schemas.common import AptlyBaseModel, VersionedSchema
 from app.schemas.content_intelligence import (
+    AnswerCorrectness,
     ClaimItem,
     EvidenceItem,
     FeedbackItem,
     PracticeDrill,
     StarAnalysis,
+    TopicCoverage,
 )
 from app.schemas.jobs import RoleProfileResponse
 
@@ -109,6 +111,11 @@ class ContentMetricsResponse(VersionedSchema):
     structure_score: float
     evidence_score: float
     overall_content_score: float
+    correctness_status: AnswerCorrectness = AnswerCorrectness.NOT_ENOUGH_EVIDENCE
+    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    correctness_summary: str = ""
+    topic_coverage: list[TopicCoverage] = Field(default_factory=list)
+    ideal_answer_outline: list[str] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     star_analysis: StarAnalysis | None = None
@@ -170,6 +177,7 @@ class InterviewCreateRequest(AptlyBaseModel):
     difficulty_level: str = Field(default="medium", description="easy, medium, hard")
     target_duration_minutes: int = Field(default=10, ge=3, le=60)
     question_count: int = Field(default=3, ge=1, le=10)
+    learner_id: str = Field(default="anonymous", min_length=1, max_length=120)
 
 
 class InterviewResponse(VersionedSchema):
@@ -182,6 +190,7 @@ class InterviewResponse(VersionedSchema):
     difficulty_level: str
     target_duration_minutes: int
     current_question_index: int
+    learner_id: str = "anonymous"
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -255,6 +264,8 @@ class InterviewReportCard(AptlyBaseModel):
 
     overall_score: float = Field(ge=0.0, le=100.0)
     content_score: float = Field(ge=0.0, le=100.0)
+    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    correctness_summary: str = ""
     delivery_score: float = Field(ge=0.0, le=100.0)
     confidence_label: str
     strengths: list[str] = Field(default_factory=list)
@@ -277,7 +288,33 @@ class InterviewReviewResponse(VersionedSchema):
     overall_filler_density: float
     total_pauses_count: int
     average_content_score: float = 0.0
+    average_correctness_score: float = 0.0
+    correct_answers_count: int = 0
     average_relevance_score: float = 0.0
     average_technical_depth_score: float = 0.0
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)
     report_card: InterviewReportCard | None = None
+
+
+class DoubtRequest(AptlyBaseModel):
+    """Candidate question asked during an interview."""
+
+    doubt: str = Field(..., min_length=2, max_length=1200)
+    candidate_answer: str = Field(default="", max_length=4000)
+
+
+class DoubtResponse(AptlyBaseModel):
+    """Grounded explanation returned by the interviewer assistant."""
+
+    answer: str
+    takeaway: str
+    related_topics: list[str] = Field(default_factory=list)
+    provider: str
+    model: str
+
+
+class NarrationRequest(AptlyBaseModel):
+    """Text to narrate with the configured expressive TTS provider."""
+
+    text: str = Field(..., min_length=1, max_length=2000)
+    voice_id: str | None = Field(default=None, max_length=80)

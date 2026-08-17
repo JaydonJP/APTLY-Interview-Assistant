@@ -116,6 +116,7 @@ class GeminiLLMProvider(LLMProvider):
             temperature=request.temperature or 0.1,
             max_output_tokens=request.max_tokens or 2000,
             response_mime_type="application/json",
+            response_json_schema=request.output_schema or None,
             system_instruction=sys_prompt,
         )
 

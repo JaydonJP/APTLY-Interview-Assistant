@@ -182,6 +182,11 @@ export interface ContentMetrics {
   structure_score: number;
   evidence_score: number;
   overall_content_score: number;
+  correctness_status: "correct" | "partially_correct" | "incorrect" | "not_enough_evidence" | string;
+  correctness_score: number;
+  correctness_summary: string;
+  topic_coverage: TopicCoverage[];
+  ideal_answer_outline: string[];
   strengths: string[];
   weaknesses: string[];
   star_analysis?: StarAnalysis | null;
@@ -194,6 +199,15 @@ export interface ContentMetrics {
   model: string;
   prompt_version: string;
   created_at: string;
+}
+
+export interface TopicCoverage {
+  topic: string;
+  covered: boolean;
+  score: number;
+  evidence_quote?: string | null;
+  explanation: string;
+  importance: string;
 }
 
 export interface Answer {
@@ -221,6 +235,7 @@ export interface InterviewDetail {
   difficulty_level: string;
   target_duration_minutes: number;
   current_question_index: number;
+  learner_id?: string;
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
@@ -246,6 +261,7 @@ export interface InterviewReview {
     difficulty_level: string;
     target_duration_minutes: number;
     current_question_index: number;
+    learner_id?: string;
     started_at?: string | null;
     completed_at?: string | null;
     created_at: string;
@@ -258,10 +274,20 @@ export interface InterviewReview {
   overall_filler_density: number;
   total_pauses_count: number;
   average_content_score?: number;
+  average_correctness_score?: number;
+  correct_answers_count?: number;
   average_relevance_score?: number;
   average_technical_depth_score?: number;
   questions_review: QuestionReviewItem[];
   report_card?: InterviewReportCard | null;
+}
+
+export interface DoubtResponse {
+  answer: string;
+  takeaway: string;
+  related_topics: string[];
+  provider: string;
+  model: string;
 }
 
 export interface ReportHabit {
@@ -303,6 +329,8 @@ export interface DeliveryOverview {
 export interface InterviewReportCard {
   overall_score: number;
   content_score: number;
+  correctness_score: number;
+  correctness_summary: string;
   delivery_score: number;
   confidence_label: string;
   strengths: string[];

@@ -30,6 +30,7 @@ from app.models.transcript import Transcript
 from app.schemas.content_intelligence import ContentAnalysisInput
 from app.services.adaptive_interview.engine import GeminiAdaptiveEngine
 from app.services.content_intelligence.service import ContentAnalysisService
+from app.services.knowledge_graph import KnowledgeGraphService
 from app.services.media_normalizer import MediaNormalizerService
 from app.services.providers.base import (
     LLMProvider,
@@ -99,6 +100,7 @@ class InterviewService:
         self.content_analysis_service = ContentAnalysisService(llm_provider)
         self.media_normalizer = MediaNormalizerService()
         self.adaptive_engine = GeminiAdaptiveEngine(llm_provider=llm_provider)
+        self.knowledge_graph = KnowledgeGraphService()
 
     def transition_state(self, interview: Interview, new_status: str) -> None:
         """Enforce strict state machine transitions."""
@@ -116,6 +118,7 @@ class InterviewService:
         question_count: int = 3,
         job_id: UUID | None = None,
         role_profile_id: UUID | None = None,
+        learner_id: str = "anonymous",
     ) -> Interview:
         """Create and configure a new interview session with generated questions."""
         # 1. Fetch role profile if provided
@@ -154,6 +157,7 @@ class InterviewService:
         # 2. Create Interview entity
         interview = Interview(
             title=title or role_profile.role_title,
+            learner_id=learner_id,
             job_id=role_profile.job_id,
             role_profile_id=role_profile.id,
             status="created",
@@ -452,6 +456,15 @@ class InterviewService:
                 provider=getattr(self.llm_provider, "PROVIDER_NAME", "gemini"),
                 model=getattr(self.llm_provider, "MODEL_NAME", "gemini-2.5-flash"),
             )
+            if question and interview:
+                await self.knowledge_graph.record_answer(
+                    db=self.db,
+                    learner_id=interview.learner_id,
+                    interview_id=interview.id,
+                    answer_id=answer.id,
+                    question=question,
+                    content_metrics=content_metrics_record,
+                )
             logger.info(
                 "content_intelligence_completed",
                 answer_id=str(answer.id),
@@ -548,6 +561,7 @@ class InterviewService:
     def _build_report_card(
         questions_review: list[dict[str, Any]],
         average_content_score: float,
+        average_correctness_score: float,
         average_wpm: float,
         total_duration_seconds: float,
         total_fillers: int,
@@ -740,7 +754,9 @@ class InterviewService:
         pause_score = max(0.0, 100.0 - total_pauses * 10.0)
         delivery_score = round((pace_score + filler_score + pause_score) / 3, 1)
         overall_score = round(
-            average_content_score * 0.65 + delivery_score * 0.35
+            average_content_score * 0.35
+            + average_correctness_score * 0.30
+            + delivery_score * 0.35
             if questions_review
             else 0.0,
             1,
@@ -761,6 +777,12 @@ class InterviewService:
         return {
             "overall_score": overall_score,
             "content_score": round(average_content_score, 1),
+            "correctness_score": round(average_correctness_score, 1),
+            "correctness_summary": (
+                f"Average answer correctness was {average_correctness_score:.0f}/100 across evaluated questions."
+                if questions_review
+                else "Answer correctness will appear after the first evaluated response."
+            ),
             "delivery_score": delivery_score,
             "confidence_label": "Measured + evidence-linked" if questions_review else "Awaiting answers",
             "strengths": list(dict.fromkeys(strengths))[:3],
@@ -812,6 +834,8 @@ class InterviewService:
         content_scores_list: list[float] = []
         relevance_scores_list: list[float] = []
         tech_depth_scores_list: list[float] = []
+        correctness_scores_list: list[float] = []
+        correct_answers_count = 0
         questions_review: list[dict[str, Any]] = []
 
         # Map answers by question_id
@@ -932,6 +956,11 @@ class InterviewService:
                         "structure_score": cm.structure_score,
                         "evidence_score": cm.evidence_score,
                         "overall_content_score": cm.overall_content_score,
+                        "correctness_status": cm.correctness_status,
+                        "correctness_score": cm.correctness_score,
+                        "correctness_summary": cm.correctness_summary,
+                        "topic_coverage": cm.topic_coverage_json,
+                        "ideal_answer_outline": cm.ideal_answer_outline_json,
                         "strengths": cm.strengths_json,
                         "weaknesses": cm.weaknesses_json,
                         "star_analysis": cm.star_analysis_json,
@@ -945,6 +974,9 @@ class InterviewService:
                         "prompt_version": cm.prompt_version,
                         "created_at": cm.created_at,
                     }
+                    correctness_scores_list.append(cm.correctness_score)
+                    if cm.correctness_status == "correct":
+                        correct_answers_count += 1
 
             questions_review.append(item)
 
@@ -967,9 +999,15 @@ class InterviewService:
             if tech_depth_scores_list
             else 0.0
         )
+        avg_correctness = (
+            round(sum(correctness_scores_list) / len(correctness_scores_list), 1)
+            if correctness_scores_list
+            else 0.0
+        )
         report_card = self._build_report_card(
             questions_review=questions_review,
             average_content_score=avg_content,
+            average_correctness_score=avg_correctness,
             average_wpm=avg_wpm,
             total_duration_seconds=total_duration,
             total_fillers=total_fillers,
@@ -985,6 +1023,7 @@ class InterviewService:
                 "difficulty_level": interview.difficulty_level,
                 "target_duration_minutes": interview.target_duration_minutes,
                 "current_question_index": interview.current_question_index,
+                "learner_id": interview.learner_id,
                 "started_at": interview.started_at,
                 "completed_at": interview.completed_at,
                 "created_at": interview.created_at,
@@ -1015,6 +1054,8 @@ class InterviewService:
             "overall_filler_density": overall_filler_density,
             "total_pauses_count": total_pauses,
             "average_content_score": avg_content,
+            "average_correctness_score": avg_correctness,
+            "correct_answers_count": correct_answers_count,
             "average_relevance_score": avg_relevance,
             "average_technical_depth_score": avg_tech_depth,
             "questions_review": questions_review,

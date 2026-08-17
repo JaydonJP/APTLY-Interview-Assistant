@@ -85,13 +85,26 @@ class FollowUpDecisionService:
                 justification="Max follow-up count for parent question reached.",
             )
 
-        # Guard 2: Short / empty answer guardrail
+        # A non-empty short answer is precisely where a real interviewer would
+        # ask the candidate to expand. Empty answers remain non-branching.
         words = transcript.strip().split()
-        if len(words) < 6:
+        if not words:
             return FollowUpDecision(
                 should_follow_up=False,
                 reason=FollowUpReason.NO_FOLLOW_UP,
-                justification="Transcript too brief for evidence-grounded follow-up.",
+                justification="No spoken evidence is available for a grounded follow-up.",
+            )
+
+        if len(words) < 6:
+            return FollowUpDecision(
+                should_follow_up=True,
+                reason=FollowUpReason.MISSING_EVIDENCE,
+                target_competency=question.competency or "Core Competency",
+                context_quote=transcript.strip(),
+                justification=(
+                    "The response is too short to verify the expected competency; "
+                    "ask the candidate to expand with reasoning and a concrete example."
+                ),
             )
 
         if not content_metrics:

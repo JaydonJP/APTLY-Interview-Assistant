@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { VideoPreview } from "@/components/camera/VideoPreview";
@@ -15,7 +15,7 @@ import {
 import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
 import { apiClient } from "@/lib/api-client";
-import type { Answer, InterviewDetail, Question } from "@/types/interview";
+import type { Answer, DoubtResponse, InterviewDetail, Question } from "@/types/interview";
 import {
   Video,
   Square,
@@ -29,6 +29,7 @@ import {
   AlertTriangle,
   Volume2,
   Mic,
+  HelpCircle,
 } from "lucide-react";
 
 export default function LiveInterviewRoomPage() {
@@ -51,6 +52,10 @@ export default function LiveInterviewRoomPage() {
   // Question / Auto-Record Lifecycle State
   const [isTtsPlaying, setIsTtsPlaying] = useState(false);
   const [autoRecordCountdown, setAutoRecordCountdown] = useState<number | null>(null);
+  const [doubt, setDoubt] = useState("");
+  const [doubtAnswer, setDoubtAnswer] = useState<DoubtResponse | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const narrationRef = useRef<HTMLAudioElement | null>(null);
 
   // Unified Media Capture Hook
   const {
@@ -144,52 +149,94 @@ export default function LiveInterviewRoomPage() {
   const currentQIndex = (interview?.current_question_index || 0) + 1;
   const isLastQuestion = currentQIndex >= totalQuestions;
 
-  // Auto-Start Recording Trigger when Question becomes active & TTS completes
+  const beginRecordingCountdown = useCallback(() => {
+    setAutoRecordCountdown(3);
+    const timer = window.setInterval(() => {
+      setAutoRecordCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          window.clearInterval(timer);
+          void startRecording();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [startRecording]);
+
+  // Use server-side Gemini TTS first, with browser speech as a resilient fallback.
   useEffect(() => {
     if (!hasConsent || isRecording || recordedBlob || isSubmitting || currentAnswer) {
       return;
     }
+    if (!currentQuestion || typeof window === "undefined") return;
 
-    // Play TTS audio or speech synthesizer for question
-    if (currentQuestion && typeof window !== "undefined" && "speechSynthesis" in window) {
-      setIsTtsPlaying(true);
+    let cancelled = false;
+    const speakFallback = () => {
+      if (cancelled) return;
+      if (!("speechSynthesis" in window)) {
+        beginRecordingCountdown();
+        return;
+      }
       window.speechSynthesis.cancel();
-
       const utterance = new SpeechSynthesisUtterance(currentQuestion.question_text);
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
-
+      utterance.rate = 0.98;
+      utterance.pitch = 1.04;
       utterance.onend = () => {
         setIsTtsPlaying(false);
-        // 400ms pre-roll preparation countdown before starting
-        setAutoRecordCountdown(3);
-        const timer = setInterval(() => {
-          setAutoRecordCountdown((prev) => {
-            if (prev === null || prev <= 1) {
-              clearInterval(timer);
-              void startRecording();
-              return null;
-            }
-            return prev - 1;
-          });
-        }, 300);
+        beginRecordingCountdown();
       };
-
       utterance.onerror = () => {
         setIsTtsPlaying(false);
-        void startRecording();
+        beginRecordingCountdown();
       };
-
       window.speechSynthesis.speak(utterance);
-    }
+    };
+
+    setIsTtsPlaying(true);
+    void apiClient
+      .postBlob(`/api/v1/interviews/${interviewId}/narrate`, { text: currentQuestion.question_text })
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        narrationRef.current = audio;
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          narrationRef.current = null;
+          setIsTtsPlaying(false);
+          beginRecordingCountdown();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          narrationRef.current = null;
+          setIsTtsPlaying(false);
+          speakFallback();
+        };
+        void audio.play().catch(() => {
+          setIsTtsPlaying(false);
+          speakFallback();
+        });
+      })
+      .catch(() => {
+        setIsTtsPlaying(false);
+        speakFallback();
+      });
+
+    return () => {
+      cancelled = true;
+      narrationRef.current?.pause();
+      narrationRef.current = null;
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    };
   }, [
+    beginRecordingCountdown,
     currentAnswer,
     currentQuestion,
     hasConsent,
+    interviewId,
     isRecording,
     isSubmitting,
     recordedBlob,
-    startRecording,
   ]);
 
   // Enforce Maximum Answer Duration (180s)
@@ -292,6 +339,26 @@ export default function LiveInterviewRoomPage() {
         err instanceof Error ? err.message : "Failed to finish interview.",
       );
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDoubt = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!doubt.trim() || !currentQuestion) return;
+    setIsExplaining(true);
+    try {
+      const response = await apiClient.post<DoubtResponse>(
+        `/api/v1/interviews/${interviewId}/questions/${currentQuestion.id}/explain`,
+        {
+          doubt: doubt.trim(),
+          candidate_answer: currentAnswer?.transcript?.full_text ?? "",
+        },
+      );
+      setDoubtAnswer(response);
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "The interviewer could not explain that yet.");
+    } finally {
+      setIsExplaining(false);
     }
   };
 
@@ -626,6 +693,12 @@ export default function LiveInterviewRoomPage() {
           </Card>
         </div>
       </div>
+
+      <section className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-300/5 p-5 sm:p-6">
+        <div className="flex items-start gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-200"><HelpCircle className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold text-white">Ask the interviewer for clarification</h2><p className="mt-1 text-xs leading-5 text-slate-500">Pause the practice at any time. APTLY explains the concept in context, then you answer in your own words.</p></div></div>
+        <form onSubmit={handleDoubt} className="mt-4 flex flex-col gap-3 sm:flex-row"><input value={doubt} onChange={(event) => setDoubt(event.target.value)} placeholder="What does this part of the question mean?" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-300/40" /><button type="submit" disabled={isExplaining || !doubt.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{isExplaining ? "Explaining…" : "Explain this"}</button></form>
+        {doubtAnswer && <div className="mt-4 rounded-xl border border-white/10 bg-black/15 p-4"><p className="text-sm leading-6 text-slate-300">{doubtAnswer.answer}</p><p className="mt-3 border-t border-white/8 pt-3 text-xs leading-5 text-cyan-100/70"><span className="font-semibold text-cyan-100">Takeaway:</span> {doubtAnswer.takeaway}</p></div>}
+      </section>
 
       {/* ── FOOTER NAVIGATION ─────────────────────────────────────── */}
       <div className="mt-8 flex items-center justify-between border-t border-slate-800/80 pt-6">

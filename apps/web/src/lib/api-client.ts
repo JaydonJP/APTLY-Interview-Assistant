@@ -25,6 +25,16 @@ export function getMediaUrl(storageKey: string): string {
     .join("/")}`;
 }
 
+export function getLearnerId(): string {
+  if (typeof window === "undefined") return "anonymous";
+  const key = "aptly_learner_id";
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const generated = crypto.randomUUID();
+  window.localStorage.setItem(key, generated);
+  return generated;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly code: string,
@@ -129,5 +139,18 @@ export const apiClient = {
     }
 
     return response.json() as Promise<T>;
+  },
+
+  postBlob: async (path: string, body?: unknown): Promise<Blob> => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!response.ok) {
+      const error = await parseErrorResponse(response);
+      throw new ApiError(error.code, error.message, error.request_id, response.status);
+    }
+    return response.blob();
   },
 };

@@ -151,6 +151,32 @@ class MockLLMProvider(LLMProvider):
                 "structure_score": 85.0,
                 "evidence_score": 84.0,
                 "overall_content_score": 84.0,
+                "correctness_status": "correct",
+                "correctness_score": 86.0,
+                "correctness_summary": "The answer addressed the core mechanism and connected the decision to a measurable performance outcome.",
+                "topic_coverage": [
+                    {
+                        "topic": "Database Indexing & Query Optimization",
+                        "covered": True,
+                        "score": 88.0,
+                        "evidence_quote": transcript_text[:80] if transcript_text else "Used indexing and caching",
+                        "explanation": "The transcript references indexes and performance improvement.",
+                        "importance": "core",
+                    },
+                    {
+                        "topic": "Caching trade-offs",
+                        "covered": False,
+                        "score": 35.0,
+                        "evidence_quote": None,
+                        "explanation": "The answer did not explain invalidation or memory trade-offs.",
+                        "importance": "supporting",
+                    },
+                ],
+                "ideal_answer_outline": [
+                    "Name the approach and why it fits the workload.",
+                    "Explain the mechanism and the main trade-off.",
+                    "Close with a measured result and how it was validated.",
+                ],
                 "strengths": [
                     "Directly addressed the core technical requirements of the question.",
                     "Demonstrated clear understanding of performance profiling and caching patterns.",

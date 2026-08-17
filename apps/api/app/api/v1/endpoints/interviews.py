@@ -7,7 +7,16 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import get_idempotency_key
@@ -16,20 +25,32 @@ from app.dependencies import (
     get_llm_provider,
     get_storage,
     get_transcription_provider,
+    get_tts_provider,
 )
+from app.models.interview import Interview
+from app.models.question import Question
 from app.schemas.interviews import (
     AnswerCreateRequest,
     AnswerResponse,
     ContentMetricsResponse,
+    DoubtRequest,
+    DoubtResponse,
     InterviewCreateRequest,
     InterviewDetailResponse,
     InterviewReviewResponse,
+    NarrationRequest,
     QuestionResponse,
     SpeechMetricsResponse,
     TranscriptResponse,
 )
 from app.services.interview_service import InterviewService
-from app.services.providers.base import LLMProvider, TranscriptionProvider
+from app.services.providers.base import (
+    LLMGenerateRequest,
+    LLMProvider,
+    TranscriptionProvider,
+    TTSProvider,
+    TTSSynthesisRequest,
+)
 from app.services.storage.base import StorageProvider
 
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
@@ -70,6 +91,7 @@ async def create_interview(
         question_count=payload.question_count,
         job_id=payload.job_id,
         role_profile_id=payload.role_profile_id,
+        learner_id=payload.learner_id,
     )
 
     detail = await service.get_interview_detail(interview.id)
@@ -216,6 +238,78 @@ async def get_interview_review(
     return InterviewReviewResponse(**review)
 
 
+@router.post(
+    "/{interview_id}/questions/{question_id}/explain",
+    response_model=DoubtResponse,
+    summary="Explain a question doubt",
+    description="Answers a candidate's question using the current role and interview context.",
+)
+async def explain_question_doubt(
+    interview_id: UUID,
+    question_id: UUID,
+    payload: DoubtRequest,
+    service: InterviewService = Depends(_get_interview_service),
+) -> DoubtResponse:
+    """Provide a grounded explanation without changing the interview state."""
+    question = await service.db.get(Question, question_id)
+    interview = await service.db.get(Interview, interview_id)
+    if not question or not interview or question.interview_id != interview_id:
+        raise HTTPException(status_code=404, detail="Question not found for this interview.")
+    role = interview.role_profile
+    prompt = (
+        f"The candidate is practicing for {role.role_title if role else interview.title}.\n"
+        f"Interview question: {question.question_text}\n"
+        f"Expected topics: {', '.join(question.expected_topics)}\n"
+        f"Candidate's doubt: {payload.doubt}\n"
+        f"Candidate's answer so far: {payload.candidate_answer or 'Not answered yet'}\n\n"
+        "Explain the concept in plain language, connect it to the interview question, "
+        "and give one compact example. Do not answer on behalf of the candidate or invent role requirements."
+    )
+    generated = await service.llm_provider.generate_text(
+        LLMGenerateRequest(
+            prompt=prompt,
+            system_prompt=(
+                "You are a patient senior interviewer. Explain doubts conversationally, "
+                "encourage the learner, and keep the answer technically accurate."
+            ),
+            temperature=0.25,
+            max_tokens=500,
+        )
+    )
+    return DoubtResponse(
+        answer=generated.text.strip(),
+        takeaway="Use the explanation to structure your own answer; the evaluator scores what you say.",
+        related_topics=question.expected_topics[:5],
+        provider=generated.provider,
+        model=generated.model,
+    )
+
+
+@router.post(
+    "/{interview_id}/narrate",
+    summary="Narrate interviewer text",
+    description="Returns expressive Gemini TTS audio; the API key stays server-side.",
+)
+async def narrate_text(
+    interview_id: UUID,
+    payload: NarrationRequest,
+    tts_provider: TTSProvider = Depends(get_tts_provider),
+) -> Response:
+    """Generate human-sounding interviewer narration."""
+    generated = await tts_provider.synthesize(
+        TTSSynthesisRequest(
+            text=payload.text,
+            voice_id=payload.voice_id or "Kore",
+            metadata={"interview_id": str(interview_id)},
+        )
+    )
+    return Response(
+        content=generated.audio_bytes,
+        media_type=generated.content_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
+
+
 # ── Response Mappers ──────────────────────────────────────────────────────────
 
 
@@ -251,6 +345,7 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
         difficulty_level=interview.difficulty_level,
         target_duration_minutes=interview.target_duration_minutes,
         current_question_index=interview.current_question_index,
+        learner_id=getattr(interview, "learner_id", "anonymous"),
         started_at=interview.started_at,
         completed_at=interview.completed_at,
         created_at=interview.created_at,
@@ -326,6 +421,11 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             structure_score=cm.structure_score,
             evidence_score=cm.evidence_score,
             overall_content_score=cm.overall_content_score,
+            correctness_status=cm.correctness_status,
+            correctness_score=cm.correctness_score,
+            correctness_summary=cm.correctness_summary,
+            topic_coverage=cm.topic_coverage_json,
+            ideal_answer_outline=cm.ideal_answer_outline_json,
             strengths=cm.strengths_json,
             weaknesses=cm.weaknesses_json,
             star_analysis=cm.star_analysis_json,

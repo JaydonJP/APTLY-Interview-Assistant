@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getLearnerId } from "@/lib/api-client";
+import type { LearnerProgress } from "@/types/progress";
 import type { Job, RoleProfile, InterviewDetail } from "@/types/interview";
 import {
   Briefcase,
@@ -71,6 +72,19 @@ export default function NewInterviewPage() {
   const [difficultyLevel, setDifficultyLevel] = useState<string>("medium");
   const [targetDurationMinutes, setTargetDurationMinutes] = useState<number>(10);
   const [questionCount, setQuestionCount] = useState<number>(3);
+  const [recommendedDifficulty, setRecommendedDifficulty] = useState<string | null>(null);
+
+  useEffect(() => {
+    void apiClient
+      .get<LearnerProgress>(`/api/v1/progress?learner_id=${encodeURIComponent(getLearnerId())}`)
+      .then((progress) => {
+        setRecommendedDifficulty(progress.recommended_difficulty);
+        if (progress.sessions_completed > 0) {
+          setDifficultyLevel(progress.recommended_difficulty);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Step 1: Analyze Job Description
   const handleAnalyzeJD = async () => {
@@ -119,6 +133,7 @@ export default function NewInterviewPage() {
         difficulty_level: difficultyLevel,
         target_duration_minutes: targetDurationMinutes,
         question_count: questionCount,
+        learner_id: getLearnerId(),
       };
 
       const interview = await apiClient.post<InterviewDetail>(
@@ -483,6 +498,11 @@ export default function NewInterviewPage() {
                 <label className="text-xs font-medium text-slate-300 mb-2 block">
                   Target Difficulty
                 </label>
+                {recommendedDifficulty && (
+                  <p className="mb-2 rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-[11px] leading-5 text-emerald-200">
+                    Progression engine recommends <span className="font-semibold">{recommendedDifficulty}</span> based on your topic mastery. You can still choose any level.
+                  </p>
+                )}
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: "easy", label: "Standard / Warm-up" },

@@ -190,11 +190,29 @@ async def get_content_analysis_service(
 
 
 @lru_cache
-def _get_tts_provider_instance(provider: str) -> TTSProvider:
+def _get_tts_provider_instance(
+    provider: str,
+    api_key: str = "",
+    model: str = "gemini-3.1-flash-tts-preview",
+    voice: str = "Kore",
+    style: str = "",
+    timeout_seconds: float = 30.0,
+) -> TTSProvider:
     """Create and cache the TTS provider (singleton)."""
     if provider == "mock":
         logger.info("tts_provider_init", provider="mock")
         return MockTTSProvider()
+    if provider == "gemini":
+        from app.services.providers.gemini_tts import GeminiTTSProvider
+
+        logger.info("tts_provider_init", provider="gemini", model=model, voice=voice)
+        return GeminiTTSProvider(
+            api_key=api_key,
+            model=model or "gemini-3.1-flash-tts-preview",
+            voice=voice or "Kore",
+            style=style,
+            timeout_seconds=timeout_seconds,
+        )
     # Phase 1+: add elevenlabs, openai implementations here
     msg = f"TTS provider '{provider}' is not yet implemented"
     raise NotImplementedError(msg)
@@ -204,7 +222,14 @@ async def get_tts_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TTSProvider:
     """FastAPI dependency: returns the configured TTS provider."""
-    return _get_tts_provider_instance(settings.tts_provider)
+    return _get_tts_provider_instance(
+        settings.tts_provider,
+        settings.gemini_api_key or settings.tts_api_key,
+        settings.tts_model,
+        settings.tts_voice,
+        settings.tts_style,
+        settings.tts_timeout_seconds,
+    )
 
 
 # ── Transcription Provider ────────────────────────────────────────────────────

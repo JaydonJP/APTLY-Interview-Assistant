@@ -66,3 +66,33 @@ def test_followup_decision_unsupported_claim_trigger() -> None:
     assert res.should_follow_up is True
     assert res.reason == FollowUpReason.CLAIM_REQUIRES_CLARIFICATION
     assert res.context_quote == "I improved API throughput by 40 percent."
+
+
+def test_followup_decision_expands_short_non_empty_answer() -> None:
+    service = FollowUpDecisionService()
+    q = Question(
+        id=uuid4(),
+        interview_id=uuid4(),
+        question_text="How would you debug a slow API?",
+        competency="Debugging",
+        follow_up_depth=0,
+    )
+    metrics = ContentMetrics(
+        id=uuid4(),
+        answer_id=uuid4(),
+        overall_content_score=10.0,
+        relevance_score=10.0,
+        technical_depth_score=0.0,
+        structure_score=10.0,
+        evidence_score=0.0,
+        claims_json=[],
+        star_analysis_json=None,
+        evidence_json=[],
+        strengths_json=[],
+        weaknesses_json=[],
+        feedback_json=[],
+        practice_drills_json=[],
+    )
+    res = service.evaluate_decision(question=q, transcript="Use caching.", content_metrics=metrics)
+    assert res.should_follow_up is True
+    assert res.reason == FollowUpReason.MISSING_EVIDENCE

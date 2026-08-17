@@ -12,6 +12,7 @@ from app.services.providers.base import (
     TranscriptionRequest,
     TTSSynthesisRequest,
 )
+from app.services.providers.gemini_tts import GeminiTTSProvider
 from app.services.providers.mock_llm import MockLLMProvider
 from app.services.providers.mock_transcription import MockTranscriptionProvider
 from app.services.providers.mock_tts import MockTTSProvider
@@ -89,6 +90,27 @@ async def test_mock_tts_duration_scales_with_word_count() -> None:
         TTSSynthesisRequest(text="This is a much longer sentence with many more words.")
     )
     assert long_.duration_seconds > short.duration_seconds
+
+
+@pytest.mark.asyncio
+async def test_gemini_tts_wraps_mocked_pcm() -> None:
+    """Gemini TTS converts returned PCM into browser-playable WAV audio."""
+    import base64
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    provider = GeminiTTSProvider(api_key="test-gemini-key")
+    pcm = b"\x00\x00" * 2400
+    interaction = SimpleNamespace(
+        output_audio=SimpleNamespace(data=base64.b64encode(pcm).decode("ascii"))
+    )
+    with patch.object(provider._client.interactions, "create", return_value=interaction):
+        result = await provider.synthesize(
+            TTSSynthesisRequest(text="Tell me about your last project.")
+        )
+    assert result.content_type == "audio/wav"
+    assert result.audio_bytes.startswith(b"RIFF")
+    assert result.duration_seconds > 0
 
 
 # ── Transcription Provider ────────────────────────────────────────────────────

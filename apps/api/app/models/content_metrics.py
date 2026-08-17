@@ -54,6 +54,24 @@ class ContentMetrics(UUIDMixin, TimestampMixin, Base):
     evidence_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     overall_content_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
+    # Explicit correctness/readiness analysis. These are separate from speech
+    # delivery metrics so the report can answer "did I answer the question?".
+    correctness_status: Mapped[str] = mapped_column(
+        String(40), default="not_enough_evidence", nullable=False
+    )
+    correctness_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    correctness_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    topic_coverage_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        default=list,
+        nullable=False,
+    )
+    ideal_answer_outline_json: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"),
+        default=list,
+        nullable=False,
+    )
+
     # Structured Components
     strengths_json: Mapped[list[str]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"),

@@ -43,6 +43,25 @@ Status: complete.
 
 Status: in progress until push succeeds.
 
+## 5. Add the real interview intelligence layer
+
+- Make Supabase Storage the only runtime media provider and fail fast when the project URL or server-side key is missing.
+- Use Gemini Flash for role/question generation, answer correctness, topic coverage, ideal-answer outlines, adaptive follow-ups, and grounded doubt explanations.
+- Add a persistent learner ID, per-answer topic mastery, a knowledge graph of related concepts, and difficulty recommendations that move from easy to medium to hard as mastery improves.
+- Add post-interview answer review alongside WPM, filler, and pause metrics.
+- Add server-side Gemini Flash TTS narration with a browser speech fallback for resilience.
+
+Status: complete in code; live Supabase activation requires the project URL, service-role key, and Supabase PostgreSQL connection string in `apps/api/.env`.
+
+## 6. Final validation and delivery
+
+- Run Ruff and the complete backend test suite.
+- Run frontend TypeScript validation and inspect the generated API contracts.
+- Check that secrets remain ignored and that the diff has no whitespace errors.
+- Commit and push the finished implementation to the requested repository.
+
+Status: in progress until push succeeds.
+
 ## Deliberate measurement boundary
 
 The report labels camera attention and voice energy as unavailable until a reliable, privacy-safe telemetry pipeline is attached. APTLY does not fabricate eye contact, emotion, identity, or personality scores; it only presents signals that can be measured and replayed.
@@ -52,4 +71,4 @@ The report labels camera attention and voice energy as unavailable until a relia
 - Aligned local Compose credentials, API defaults, integration-test defaults, and environment examples.
 - Added `pgcrypto` initialization for migration UUID defaults.
 - Added PostgreSQL readiness retries and replaced the misleading SQLite startup fallback with a clear failure message.
-- Added regression coverage for the local database contract and documented existing-volume troubleshooting.
+- Added regression coverage proving the runtime does not silently fall back to a local database; documented remote Supabase connection troubleshooting and kept Docker only as an optional sandbox.

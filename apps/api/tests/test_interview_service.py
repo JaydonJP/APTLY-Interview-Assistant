@@ -125,3 +125,18 @@ async def test_full_interview_endpoints_flow(client: AsyncClient) -> None:
     assert review_data["report_card"]["overall_score"] >= 0
     assert review_data["report_card"]["delivery"]["pace_label"]
     assert review_data["report_card"]["evidence_events"]
+    assert review_data["report_card"]["correctness_score"] >= 0
+    assert review_data["questions_review"][0]["content_metrics"]["topic_coverage"]
+
+    # 9. Ask a contextual doubt and inspect durable learner progress.
+    doubt_res = await client.post(
+        f"/api/v1/interviews/{interview_id}/questions/{question_1_id}/explain",
+        json={"doubt": "What trade-off should I mention?"},
+    )
+    assert doubt_res.status_code == 200
+    assert doubt_res.json()["answer"]
+
+    progress_res = await client.get("/api/v1/progress?learner_id=anonymous")
+    assert progress_res.status_code == 200
+    assert progress_res.json()["answers_reviewed"] == 1
+    assert progress_res.json()["topics"]

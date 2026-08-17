@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import interviews, jobs, realtime, storage
+from app.api.v1.endpoints import interviews, jobs, progress, realtime, storage
 
 router = APIRouter()
 
@@ -17,3 +17,4 @@ router.include_router(jobs.router)
 router.include_router(interviews.router)
 router.include_router(realtime.router)
 router.include_router(storage.router)
+router.include_router(progress.router)

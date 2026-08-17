@@ -62,16 +62,19 @@ Implemented:
 - Browser audio-level monitoring.
 - Client-side SHA-256 recording checksum.
 - FastAPI interview lifecycle APIs.
-- Local filesystem storage provider.
-- Supabase Storage provider.
+- Supabase Storage as the runtime media provider; local disk is only used by isolated unit-test overrides.
 - Safe private media playback endpoint.
 - FFmpeg-based 16 kHz mono WAV normalization.
 - Mock transcription provider with word timestamps.
 - WhisperX/faster-whisper provider interface.
 - Deterministic speech metrics.
 - Structured content intelligence and STAR analysis.
+- Explicit answer correctness verdicts, topic-by-topic coverage, and ideal-answer outlines.
 - Mock LLM provider.
 - Google Gemini provider using the official Google GenAI SDK.
+- Gemini Flash difficulty-aware question generation, answer evaluation, follow-ups, and doubt explanations.
+- Expressive Gemini Flash TTS narration with a browser speech fallback.
+- Persistent learner progress, topic mastery, knowledge graph nodes, and co-occurrence edges.
 - Evidence-backed report card.
 - Top habits and practice drills.
 - Evidence Replay with recording/transcript seeking.
@@ -85,7 +88,7 @@ Intentionally not overclaimed:
 - Voice-energy trend is currently shown as unavailable in the report. The live room has an audio level visualizer, but that live signal is not yet persisted as an answer-level metric.
 - The current local processing path runs inline inside the API request after upload. Redis and worker-oriented architecture are configured/documented for the next step, but the current demo does not yet enqueue a background job.
 - Authentication, multi-user authorization, account-level deletion workflows, and production rate limiting are not complete.
-- Historical progress charts are currently a prepared product surface rather than a complete multi-session analytics system.
+- User authentication and account-level authorization are not complete; the current learner identity is an anonymous browser-generated ID persisted with the interview records.
 
 ---
 
@@ -96,7 +99,7 @@ At a high level, APTLY has four areas:
 - Browser application: interview setup, consent, capture, live question room, and report UI.
 - FastAPI application: API contracts, interview orchestration, provider selection, processing pipeline, and persistence.
 - PostgreSQL: durable interview, job, question, answer, transcript, speech metric, and content metric records.
-- Object storage: raw recordings and future artifacts. Local development uses a safe local provider; production-style deployments can use Supabase Storage.
+- Supabase Storage: private raw recordings and normalized audio artifacts. Runtime code does not fall back to a local filesystem provider.
 
 ### High-level diagram
 
@@ -106,7 +109,7 @@ flowchart LR
     API["FastAPI REST API"]
     DB[("PostgreSQL")]
     Redis[("Redis")]
-    Storage[("Local or Supabase Storage")]
+    Storage[("Supabase Storage\nprivate aptly-media bucket")]
     Normalize["FFmpeg normalization"]
     Transcribe["WhisperX or mock transcription"]
     Speech["Deterministic speech metrics"]
@@ -198,11 +201,11 @@ The interfaces are separated so the inline path can later be moved behind Redis 
 | LLM interface | Provider abstraction | Allows mock mode and real providers without coupling services |
 | Real LLM | Google Gemini through google-genai | Structured semantic analysis and grounded follow-ups |
 | Transcription interface | Mock or WhisperX/faster-whisper | Word-level transcript and timestamps |
-| Object storage | Local provider or Supabase Storage | Opaque recording keys and provider portability |
+| Object storage | Supabase Storage | Private opaque recording keys; local disk is test-only |
 | Quality checks | Ruff, MyPy configuration, ESLint, TypeScript | Static correctness and maintainability |
 | Local orchestration | Docker Compose | PostgreSQL and Redis development services |
 
-Some packages and provider implementations exist as extension points but are not active in the default demo configuration. The default path uses mock AI providers so the product can be demonstrated without external API keys.
+Some packages and provider implementations exist as extension points but are not active in the default test configuration. The checked-in runtime example is configured for Supabase Storage, Gemini Flash analysis, Gemini TTS narration, and mock transcription unless WhisperX is explicitly enabled.
 
 ---
 
@@ -520,7 +523,7 @@ StorageProvider
 
 Current implementations include MockLLMProvider, GeminiLLMProvider, MockTranscriptionProvider, WhisperXTranscriptionProvider, MockTTSProvider, LocalStorageProvider, and SupabaseStorageProvider.
 
-The mock providers are important for a hackathon demo because they make the application runnable without external services or API keys.
+The mock providers are important for the hackathon test/demo harness because they make AI behavior deterministic without external AI calls. The actual runtime still requires Supabase PostgreSQL and Supabase Storage; it does not replace those remote services with local files.
 
 ### 6.5 Error handling
 
@@ -536,7 +539,7 @@ For a PostgreSQL URL, startup:
 
 1. Creates the async SQLAlchemy engine.
 2. Retries connection/schema initialization while PostgreSQL is becoming ready.
-3. Creates missing tables from SQLAlchemy metadata for local development.
+3. Creates missing tables from SQLAlchemy metadata as a development convenience; the checked-in remote setup uses reviewed Alembic migrations.
 4. Fails with an actionable error if PostgreSQL is still unavailable.
 
 Alembic migrations are also included for controlled schema evolution:
@@ -546,7 +549,7 @@ cd apps/api
 alembic upgrade head
 ~~~
 
-The current local startup path uses metadata creation for convenience. Production deployments should use reviewed Alembic migrations as the schema authority.
+The runtime configuration does not silently fall back to SQLite or a local PostgreSQL server. Set `DATABASE_URL` to the Supabase PostgreSQL connection string and apply Alembic migrations before starting the API. Production deployments should use reviewed Alembic migrations as the schema authority.
 
 ---
 
@@ -779,29 +782,20 @@ The frontend is designed around explicit loading, permission, recording, process
 
 APTLY stores media using an abstraction rather than writing application code directly against a filesystem or vendor SDK.
 
-### Local storage
+### Runtime storage policy
 
-LocalStorageProvider:
-
-- writes under a configured root such as ./storage
-- creates opaque UUID-based keys
-- stores metadata JSON sidecars
-- validates MIME type and size
-- blocks traversal attempts
-- blocks access to metadata sidecars through the media route
-- returns API playback paths instead of file URLs
-
-Example key:
-
-~~~text
-raw_audio/4bf3.../a1b2....webm
-~~~
-
-Raw media directories are ignored by Git.
+Runtime media is Supabase-only. The application stores opaque object keys in
+PostgreSQL and never writes recordings to the API container filesystem. The
+local provider still exists solely so unit tests can exercise the provider
+contract without a network dependency.
 
 ### Supabase Storage
 
 SupabaseStorageProvider uses the Supabase Storage HTTP API and supports upload, download, delete, existence checks, and signed URL generation.
+
+At API startup it verifies the private aptly-media bucket and creates it as a
+private bucket when it does not exist. The server-side service-role key is used
+only by FastAPI; the browser receives neither that key nor a public storage URL.
 
 The service-role key is server-side only and must never be exposed to the frontend.
 
@@ -877,7 +871,10 @@ FastAPI exposes interactive documentation at:
 | POST /api/v1/interviews/{id}/next-question | Advance question index |
 | POST /api/v1/interviews/{id}/finish | Complete interview |
 | GET /api/v1/interviews/{id}/review | Load report card and evidence |
+| POST /api/v1/interviews/{id}/questions/{question_id}/explain | Explain a candidate doubt in context |
+| POST /api/v1/interviews/{id}/narrate | Generate server-side interviewer narration |
 | GET /api/v1/storage/media/{storage_key} | Stream stored media |
+| GET /api/v1/progress?learner_id=... | Load topic mastery and knowledge graph progress |
 
 The implemented report endpoint is /review. Some older planning documents refer to /report.
 
@@ -893,7 +890,14 @@ The implemented report endpoint is /review. Some older planning documents refer 
 - FFmpeg if using real media normalization/transcription locally
 - A browser that supports getUserMedia() and MediaRecorder for the full interview flow
 
-### 13.1 Start infrastructure
+### 13.1 Choose infrastructure
+
+For the requested remote-only runtime, use your Supabase PostgreSQL connection
+and Supabase Storage bucket. Docker PostgreSQL is not needed for application
+media or production-like data. Docker Compose remains useful only for an
+offline database/Redis development sandbox and the integration tests.
+
+If you are using the optional local infrastructure sandbox:
 
 From the repository root:
 
@@ -902,7 +906,7 @@ docker compose up -d postgres redis
 docker compose ps
 ~~~
 
-Expected services:
+Expected optional local services:
 
 ~~~text
 aptly_postgres   healthy
@@ -916,15 +920,27 @@ cd C:\OblivionX\Projects\Hackathon\APTLY\apps\api
 Copy-Item .env.example .env
 ~~~
 
-The local backend defaults to:
+The runtime backend is configured for remote Supabase services:
 
 ~~~text
-DATABASE_URL=postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev
-STORAGE_PROVIDER=local
-LLM_PROVIDER=mock
-TTS_PROVIDER=mock
+DATABASE_URL=postgresql+asyncpg://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
+SUPABASE_URL=https://[PROJECT_REF].supabase.co
+SUPABASE_SERVICE_ROLE_KEY=[server-only-service-role-key]
+STORAGE_PROVIDER=supabase
+STORAGE_BUCKET=aptly-media
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=[server-only-gemini-key]
+LLM_MODEL=gemini-2.5-flash
+TTS_PROVIDER=gemini
+TTS_MODEL=gemini-3.1-flash-tts-preview
+TTS_VOICE=Kore
 TRANSCRIPTION_PROVIDER=mock
 ~~~
+
+The repository's local apps/api/.env has the Gemini provider selected, but the
+Supabase URL and service-role key must be supplied from your Supabase project
+before the API can start. Do not commit either secret. Apply the schema to the
+same Supabase PostgreSQL database with Alembic before starting the API.
 
 ### 13.3 Install and run the backend
 
@@ -964,9 +980,11 @@ Open http://localhost:3000.
 7. Grant camera/microphone access.
 8. Record and submit an answer.
 9. Continue or finish the interview.
-10. Open the report.
-11. Click an evidence event to replay the recording at its timestamp.
-12. Use Repair Mode to retry the weakest question.
+10. Ask the interviewer to explain a doubt if a concept is unclear.
+11. Open the report to see correctness, expected topics, missing concepts, STAR coverage, content reasoning, and speech evidence.
+12. Click an evidence event to replay the recording at its timestamp.
+13. Use Repair Mode to retry the weakest question.
+14. Open Progress to see topic mastery, knowledge graph connections, and the recommended next difficulty.
 
 ---
 
@@ -1000,7 +1018,7 @@ GEMINI_API_KEY=your-key
 LLM_MODEL=gemini-2.5-flash
 ~~~
 
-The provider uses the official google-genai package, structured JSON output, bounded retries, and separate text/structured generation methods.
+The provider uses the official google-genai package, Gemini structured JSON output, bounded retries, and separate text/structured generation methods. The evaluator asks Gemini to classify each answer as correct, partially correct, incorrect, or not enough evidence; score each expected topic; quote transcript evidence; and provide a strong-answer outline. Deterministic WPM, fillers, and pauses remain computed from word timestamps rather than guessed by the model.
 
 The service still treats the LLM as an interpreter. Deterministic speech metrics are not delegated to Gemini.
 
@@ -1029,6 +1047,28 @@ STORAGE_BUCKET=aptly-media
 ~~~
 
 Never expose SUPABASE_SERVICE_ROLE_KEY in apps/web or any NEXT_PUBLIC_ variable.
+
+### Gemini narration
+
+The live room calls the server-side narration endpoint before recording each
+question. Gemini TTS receives a director-style prompt and returns expressive
+PCM audio wrapped as WAV. The default Kore voice is firm and natural; change
+TTS_VOICE to another supported Gemini voice if desired. If the endpoint is
+unavailable, the browser falls back to speech synthesis so the interview can
+still be completed.
+
+### Learner progress and difficulty
+
+Each browser gets an anonymous learner ID. After an answer is evaluated, APTLY
+upserts the question's expected topics, competency, and Gemini-discovered
+topics into knowledge_topics, updates learner_topic_progress, and increments
+co-occurrence edges in knowledge_edges. Progress recommendations are:
+
+- easy for a new learner or a weak baseline;
+- medium after a first evaluated session or when average topic mastery reaches 65;
+- hard after at least two completed sessions and average mastery reaches 82.
+
+The learner can always override the recommendation when configuring a session.
 
 ---
 
@@ -1066,7 +1106,19 @@ The production build verifies route compilation, TypeScript, static page generat
 
 ## 16. Troubleshooting
 
-### PostgreSQL connection refused
+### Supabase PostgreSQL connection failure
+
+The default runtime is remote-only. Check that `DATABASE_URL` contains the Supabase Transaction Pooler URI, that the database password is URL-encoded when necessary, and that the project is not paused in the Supabase dashboard. Then run:
+
+~~~powershell
+cd C:\OblivionX\Projects\Hackathon\APTLY\apps\api
+.\.venv\Scripts\alembic upgrade head
+.\.venv\Scripts\python.exe -c "from app.config import get_settings; s=get_settings(); print(s.database_url.split('@')[-1])"
+~~~
+
+The API fails fast if `DATABASE_URL` is empty or unreachable; it never swaps in SQLite.
+
+### Optional local infrastructure sandbox
 
 Check:
 
@@ -1082,7 +1134,7 @@ docker compose up -d postgres
 docker compose logs postgres
 ~~~
 
-If Docker is not installed or not running, install/start Docker Desktop or set DATABASE_URL to a reachable PostgreSQL instance.
+Docker is not required for the remote Supabase setup. It is only an optional sandbox for contributors who want to exercise the legacy local infrastructure profile.
 
 ### PostgreSQL password/database mismatch
 
@@ -1227,12 +1279,11 @@ The cleanest next improvements are:
 2. Add persistent browser-derived vision telemetry with explicit consent.
 3. Persist voice-energy metrics from the audio analysis layer.
 4. Add authentication and owner-based access checks to interviews/media.
-5. Add report persistence and multi-session progress trends.
-6. Add a real TTS interviewer voice.
-7. Add export/delete workflows for recordings and reports.
-8. Add end-to-end Playwright coverage for the complete browser flow.
-9. Add a production deployment profile with managed PostgreSQL, Redis, and object storage.
-10. Replace metadata table creation during startup with migration-only production startup.
+5. Add authentication and owner-based access checks to interviews, progress, and media.
+6. Add export/delete workflows for recordings and reports.
+7. Add end-to-end Playwright coverage for the complete browser flow.
+8. Add a production deployment profile with managed PostgreSQL, Redis, and Supabase Storage.
+9. Replace metadata table creation during startup with migration-only production startup.
+10. Add historical trend charts and spaced-repetition scheduling on top of the knowledge graph.
 
 The current provider contracts and service boundaries are designed to support these extensions without rewriting the frontend interview flow.
-

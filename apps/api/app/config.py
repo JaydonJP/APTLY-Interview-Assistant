@@ -7,6 +7,9 @@ In Phase 0, mock providers allow the app to start without any AI credentials.
 Usage:
     from app.config import get_settings
     settings = get_settings()
+
+AI providers may use mocks in tests, but runtime database and media storage
+connections are intentionally explicit and are not replaced with local files.
 """
 
 from __future__ import annotations
@@ -22,8 +25,9 @@ class Settings(BaseSettings):
     """
     Typed application configuration loaded from environment variables.
 
-    All fields have safe defaults for local development.
-    Never put real secrets here — use .env or secrets management.
+    Runtime infrastructure is explicit: database and remote-storage values
+    must be supplied through environment variables. Never put real secrets
+    here — use .env or a deployment secret manager.
     """
 
     model_config = SettingsConfigDict(
@@ -58,16 +62,20 @@ class Settings(BaseSettings):
 
     # ── Database ───────────────────────────────────────────────
     database_url: str = Field(
-        default="postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev"
+        default="",
+        description="Supabase PostgreSQL async connection URL",
     )
 
     # ── Redis ──────────────────────────────────────────────────
-    redis_url: str = Field(default="redis://localhost:6379/0")
+    redis_url: str = Field(default="")
 
     # ── Storage ────────────────────────────────────────────────
-    storage_provider: Literal["local", "s3", "supabase", "r2"] = "local"
+    # Interview recordings are private candidate data. Supabase Storage is the
+    # only supported runtime provider; local storage remains available only in
+    # isolated unit tests through dependency overrides.
+    storage_provider: Literal["local", "s3", "supabase", "r2"] = "supabase"
     storage_bucket: str = "aptly-media"
-    storage_endpoint: str = "./storage"
+    storage_endpoint: str = ""
     storage_access_key: str = ""
     storage_secret_key: str = ""
 
@@ -94,8 +102,15 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
 
     # ── TTS Provider ──────────────────────────────────────────
-    tts_provider: Literal["mock", "elevenlabs"] = "mock"
+    tts_provider: Literal["mock", "gemini", "elevenlabs"] = "mock"
     tts_api_key: str = ""
+    tts_model: str = "gemini-3.1-flash-tts-preview"
+    tts_voice: str = "Kore"
+    tts_timeout_seconds: float = 30.0
+    tts_style: str = (
+        "Warm, natural, curious professional interviewer. Use varied pacing, "
+        "short conversational pauses, clear articulation, and a friendly vocal smile."
+    )
 
     # ── Transcription Provider ────────────────────────────────
     transcription_provider: Literal["mock", "whisper", "whisperx", "deepgram"] = "mock"
