@@ -28,7 +28,6 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { EvidenceTimeline } from "@/components/evidence/EvidenceTimeline";
 import { RepairModeModal } from "@/components/repair/RepairModeModal";
 import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
-import { CompetencyCoverageMatrix } from "@/components/dna/CompetencyCoverageMatrix";
 import { DualPerspectivePanelCard } from "@/components/panel/DualPerspectivePanelCard";
 import type {
   ContentMetrics,
@@ -55,23 +54,6 @@ function MetricTile({ label, value, note, accent }: { label: string; value: stri
       <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500">{label}</p>
       <p className="mt-4 font-mono text-3xl text-white">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{note}</p>
-    </div>
-  );
-}
-
-function ScoreBar({ label, score }: { label: string; score: number }) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <span className="text-slate-400">{label}</span>
-        <span className={`font-mono ${scoreColor(score)}`}>{Math.round(score)}</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-white/7">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-violet-300 to-cyan-300 transition-all"
-          style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
-        />
-      </div>
     </div>
   );
 }
@@ -225,59 +207,7 @@ export default function InterviewReviewPage() {
           <DualPerspectivePanelCard panelReport={review.panel_report} />
         )}
 
-        {/* Next Rep & Measurement Notes */}
-        <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-          <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="eyebrow">Next rep</p>
-                <h2 className="mt-2 text-2xl font-semibold text-white">
-                  {report?.next_session_focus ?? "Keep the headline-first structure."}
-                </h2>
-              </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-300/12 text-violet-100">
-                <Target className="h-5 w-5" />
-              </div>
-            </div>
-            <p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">
-              Aptly ranks coaching opportunities by severity and ties each one to a drill. Fix one behavior, then run the
-              question again.
-            </p>
-            <button
-              type="button"
-              onClick={() => setIsRepairOpen(true)}
-              className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white"
-            >
-              Open Repair Mode <ArrowRight className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className="rounded-2xl border border-white/8 bg-[#0d1118] p-5 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                <ShieldCheck className="h-4 w-4 text-emerald-300" />
-                Measurement notes
-              </div>
-              <span className="rounded-full bg-emerald-300/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-200">
-                Transparent
-              </span>
-            </div>
-            <div className="mt-5 space-y-3 text-xs leading-5 text-slate-400">
-              {(report?.delivery.metric_notes ?? ["Timestamped speech metrics are deterministic."]).map((note) => (
-                <div key={note} className="flex gap-3">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-                  {note}
-                </div>
-              ))}
-              <div className="flex gap-3">
-                <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />
-                Raw camera analysis is not used for identity or emotion inference.
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Habits & Evidence Replay */}
+        {/* Habits, Confidence Crumble & Privacy Note */}
         <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="space-y-5">
             <div className="rounded-2xl border border-amber-300/15 bg-amber-300/6 p-5">
@@ -448,93 +378,28 @@ export default function InterviewReviewPage() {
                     </p>
                     {currentItem?.question.interviewer_persona && (
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider border ${
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
                           String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
-                            ? "border-violet-500/40 bg-violet-950/60 text-violet-300"
-                            : "border-cyan-500/40 bg-cyan-950/60 text-cyan-300"
+                            ? "bg-violet-950 text-violet-300 border border-violet-800/50"
+                            : "bg-cyan-950 text-cyan-300 border border-cyan-800/50"
                         }`}
                       >
-                        Asked by{" "}
                         {String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
-                          ? "Sarah Chen (HR Lead)"
+                          ? "Sarah Chen (HR)"
                           : "Alex Rivera (Tech Lead)"}
                       </span>
                     )}
                   </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-200">{currentItem?.question.question_text}</p>
+                  <h3 className="mt-1 text-sm font-semibold text-white">
+                    {currentItem?.question.question_text}
+                  </h3>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-xl border border-white/8 bg-black/15 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-300">Delivery snapshot</span>
-                    <span className="text-[10px] text-emerald-200">Deterministic</span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-xl bg-white/[0.04] p-3">
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                        <Gauge className="h-3.5 w-3.5" />
-                        Pace
-                      </div>
-                      <p className="mt-2 font-mono text-xl text-white">
-                        {currentItem?.speech_metrics?.wpm ?? 0}
-                        <span className="ml-1 text-xs text-slate-500">WPM</span>
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-white/[0.04] p-3">
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                        <Flame className="h-3.5 w-3.5" />
-                        Fillers
-                      </div>
-                      <p className="mt-2 font-mono text-xl text-white">
-                        {currentItem?.speech_metrics?.filler_count ?? 0}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-4 space-y-3">
-                    <ScoreBar label="Content quality" score={content?.overall_content_score ?? 0} />
-                    <ScoreBar label="Relevance" score={content?.relevance_score ?? 0} />
-                    <ScoreBar label="Technical depth" score={content?.technical_depth_score ?? 0} />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-cyan-300/15 bg-cyan-300/6 p-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-cyan-100">
-                    <Eye className="h-4 w-4" />
-                    Camera attention estimate
-                  </div>
-                  <p className="mt-2 text-sm text-slate-400">
-                    {report?.delivery.camera_attention_estimate == null
-                      ? "Not available for this session."
-                      : `${Math.round(report.delivery.camera_attention_estimate)}% · reliability ${Math.round(
-                          (report.delivery.camera_attention_reliability ?? 0) * 100,
-                        )}%`}
-                  </p>
-                  <p className="mt-2 text-[11px] leading-5 text-slate-500">
-                    Aptly labels this as an estimate, not laboratory eye tracking.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Evidence Timeline */}
-            <div className="mt-6 border-t border-white/8 pt-5">
-              <div className="mb-3 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-400">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-cyan-300" />
-                  Universal Evidence Events
-                </div>
-                <span className="font-normal normal-case text-slate-500">
-                  {currentQuestionEvents.length} event{currentQuestionEvents.length === 1 ? "" : "s"} in this turn
-                </span>
-              </div>
               <EvidenceTimeline
-                events={currentQuestionEvents.length ? currentQuestionEvents : events}
-                totalDurationMs={(currentItem?.answer?.duration_seconds || 60) * 1000}
+                events={currentQuestionEvents}
                 onSelectEvent={focusEvent}
                 onSeek={(sec) => {
-                  setPendingSeek(sec);
                   if (videoRef.current) {
                     videoRef.current.currentTime = sec;
                     setCurrentTime(sec);
@@ -544,9 +409,6 @@ export default function InterviewReviewPage() {
             </div>
           </div>
         </section>
-
-        {/* Job Competency Coverage Matrix */}
-        <CompetencyCoverageMatrix coverage={report?.competency_coverage} />
 
         {/* Answer DNA Breakdown */}
         <AnswerDNACard
