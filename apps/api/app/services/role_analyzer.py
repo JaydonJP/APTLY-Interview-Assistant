@@ -63,13 +63,17 @@ class RoleAnalyzerService:
             "Return valid JSON matching the schema."
         )
 
-        raw_result = await self.llm_provider.generate_structured(
-            LLMStructuredRequest(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                output_schema=schema,
+        try:
+            raw_result = await self.llm_provider.generate_structured(
+                LLMStructuredRequest(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    output_schema=schema,
+                )
             )
-        )
+        except Exception as exc:
+            logger.warning("role_analyzer_llm_failed_using_deterministic_fallback", error=str(exc))
+            raw_result = {"_mock": True, "fallback": True}
 
         # 2. Extract or parse structured fields (with intelligent fallback if mock)
         parsed = self._normalize_extracted_data(

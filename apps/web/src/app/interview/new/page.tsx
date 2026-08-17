@@ -111,6 +111,7 @@ export default function NewInterviewPage() {
     setIsCreating(true);
 
     try {
+      const isPanel = interviewType === "panel";
       const payload = {
         job_id: analyzedJob?.id,
         role_profile_id: roleProfile?.id,
@@ -119,6 +120,7 @@ export default function NewInterviewPage() {
         difficulty_level: difficultyLevel,
         target_duration_minutes: targetDurationMinutes,
         question_count: questionCount,
+        is_panel_mode: isPanel,
       };
 
       const interview = await apiClient.post<InterviewDetail>(
@@ -456,9 +458,10 @@ export default function NewInterviewPage() {
                 <label className="text-xs font-medium text-slate-300 mb-2 block">
                   Interview Focus / Type
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: "mixed", label: "Mixed (Tech + STAR)" },
+                    { id: "panel", label: "✨ Dual AI Panel (HR + Tech)" },
                     { id: "technical", label: "Deep Technical" },
                     { id: "behavioral", label: "Behavioral / STAR" },
                   ].map((item) => (
@@ -553,6 +556,51 @@ export default function NewInterviewPage() {
                 </div>
               </div>
             </div>
+
+            {/* Panel Mode Personas Preview */}
+            {interviewType === "panel" && (
+              <div className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-r from-violet-950/30 via-slate-900/60 to-cyan-950/30 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300">
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </span>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Active Panel Interviewers
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400 bg-violet-500/20 text-xs font-bold text-violet-200">
+                        SC
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-100">Sarah Chen</h4>
+                        <p className="text-[11px] text-violet-300">HR Lead & People Partner</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Evaluates STAR stories, team ownership, culture fit, and conflict resolution.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400 bg-cyan-500/20 text-xs font-bold text-cyan-200">
+                        AR
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-100">Alex Rivera</h4>
+                        <p className="text-[11px] text-cyan-300">Staff Systems Architect & Tech Lead</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Evaluates distributed system design, latency trade-offs, and failure recovery.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Launch Action */}
             <div className="mt-8 flex items-center justify-between border-t border-slate-800 pt-6">

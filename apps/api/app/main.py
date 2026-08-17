@@ -84,10 +84,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         attempts = 5 if settings.database_url.startswith("postgresql") else 1
         last_error: Exception | None = None
 
+        def _sync_sqlite_schema(sync_conn: Any) -> None:
+            Base.metadata.create_all(sync_conn)
+            # Automatic column migration for sqlite
+            try:
+                from sqlalchemy import text
+                cursor = sync_conn.connection.cursor()
+                # Check questions table columns
+                cols = [r[1] for r in cursor.execute("PRAGMA table_info(questions)").fetchall()]
+                if cols and "interviewer_persona" not in cols:
+                    cursor.execute("ALTER TABLE questions ADD COLUMN interviewer_persona VARCHAR(50)")
+                if cols and "normalized_storage_key" not in cols:
+                    cursor.execute("ALTER TABLE answers ADD COLUMN normalized_storage_key VARCHAR(255)")
+            except Exception as e:
+                logger.warning("sqlite_column_sync_warning", error=str(e))
+
         for attempt in range(1, attempts + 1):
             try:
                 async with engine.begin() as conn:
-                    await conn.run_sync(Base.metadata.create_all)
+                    await conn.run_sync(_sync_sqlite_schema)
                 return
             except Exception as exc:
                 last_error = exc

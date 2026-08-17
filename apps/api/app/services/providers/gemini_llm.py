@@ -58,9 +58,14 @@ class GeminiLLMProvider(LLMProvider):
             self._client = genai.Client(api_key=self.api_key)
 
     async def generate_text(self, request: LLMGenerateRequest) -> LLMGenerateResponse:
-        """Generate unstructured text from Gemini."""
+        """Generate unstructured text from Gemini with automatic retry and safe fallback."""
         if not self._client:
-            raise ProviderError("GEMINI_API_KEY is not configured on the server.")
+            logger.warning("gemini_client_missing_fallback")
+            return LLMGenerateResponse(
+                text="Please elaborate on your technical approach and specific engineering trade-offs.",
+                provider="gemini_fallback",
+                model=self.model,
+            )
 
         config = types.GenerateContentConfig(
             temperature=request.temperature or 0.2,
@@ -71,12 +76,15 @@ class GeminiLLMProvider(LLMProvider):
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                # Run synchronous SDK call in thread pool to preserve async event loop
-                response = await asyncio.to_thread(
-                    self._client.models.generate_content,
-                    model=self.model,
-                    contents=request.prompt,
-                    config=config,
+                # Run synchronous SDK call in thread pool with timeout
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._client.models.generate_content,
+                        model=self.model,
+                        contents=request.prompt,
+                        config=config,
+                    ),
+                    timeout=self.timeout,
                 )
 
                 text_out = response.text or ""
@@ -95,17 +103,49 @@ class GeminiLLMProvider(LLMProvider):
                 last_err = exc
                 logger.warning("gemini_generate_text_failed", attempt=attempt + 1, error=str(exc))
                 if attempt < 2:
-                    await asyncio.sleep(1.0 * (attempt + 1))
+                    await asyncio.sleep(0.5 * (attempt + 1))
 
-        raise ProviderError(f"Gemini generate_text failed after retries: {last_err}") from last_err
+        logger.error("gemini_generate_text_exhausted_retries", error=str(last_err))
+        return LLMGenerateResponse(
+            text="Could you describe the key trade-offs and validation approach for this design?",
+            provider="gemini_fallback",
+            model=self.model,
+        )
+
+    def _recover_json(self, raw_text: str) -> dict[str, Any] | None:
+        """Attempt to extract valid JSON from raw or markdown-wrapped LLM text."""
+        clean_text = raw_text.strip()
+        if clean_text.startswith("```json"):
+            clean_text = clean_text[7:]
+        elif clean_text.startswith("```"):
+            clean_text = clean_text[3:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+
+        try:
+            return json.loads(clean_text)
+        except Exception:
+            pass
+
+        # Try finding JSON object brackets {...}
+        import re
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                pass
+        return None
 
     async def generate_structured(
         self,
         request: LLMStructuredRequest,
     ) -> dict[str, Any]:
-        """Generate validated structured JSON dictionary matching output_schema."""
+        """Generate validated structured JSON dictionary matching output_schema with retry & fallback."""
         if not self._client:
-            raise ProviderError("GEMINI_API_KEY is not configured on the server.")
+            logger.warning("gemini_client_missing_structured_fallback")
+            return {"_mock": True, "fallback": True}
 
         sys_prompt = (
             (request.system_prompt or "You are an expert AI evaluator.")
@@ -122,33 +162,30 @@ class GeminiLLMProvider(LLMProvider):
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                response = await asyncio.to_thread(
-                    self._client.models.generate_content,
-                    model=self.model,
-                    contents=request.prompt,
-                    config=config,
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self._client.models.generate_content,
+                        model=self.model,
+                        contents=request.prompt,
+                        config=config,
+                    ),
+                    timeout=self.timeout,
                 )
 
                 text_content = response.text or "{}"
-                # Clean any accidental markdown fence if present
-                clean_text = text_content.strip()
-                if clean_text.startswith("```json"):
-                    clean_text = clean_text[7:]
-                elif clean_text.startswith("```"):
-                    clean_text = clean_text[3:]
-                if clean_text.endswith("```"):
-                    clean_text = clean_text[:-3]
-                clean_text = clean_text.strip()
+                recovered = self._recover_json(text_content)
+                if recovered is not None and isinstance(recovered, dict):
+                    return recovered
 
-                parsed_dict: dict[str, Any] = json.loads(clean_text)
-                return parsed_dict
+                logger.warning("gemini_invalid_json_received", attempt=attempt + 1, snippet=text_content[:150])
             except Exception as exc:
                 last_err = exc
                 logger.warning("gemini_generate_structured_failed", attempt=attempt + 1, error=str(exc))
                 if attempt < 2:
-                    await asyncio.sleep(1.0 * (attempt + 1))
+                    await asyncio.sleep(0.5 * (attempt + 1))
 
-        raise ProviderError(f"Gemini generate_structured failed after retries: {last_err}") from last_err
+        logger.error("gemini_generate_structured_fallback_used", error=str(last_err))
+        return {"_mock": True, "fallback": True}
 
     async def generate_followup(
         self,

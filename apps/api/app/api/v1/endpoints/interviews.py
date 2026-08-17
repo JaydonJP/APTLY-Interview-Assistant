@@ -30,6 +30,7 @@ from app.schemas.interviews import (
     SpeechMetricsResponse,
     TranscriptResponse,
 )
+from app.schemas.panel import get_persona_profile
 from app.services.interview_service import InterviewService
 from app.services.providers.base import LLMProvider, TranscriptionProvider
 from app.services.storage.base import StorageProvider
@@ -91,6 +92,7 @@ async def create_interview(
         job_id=payload.job_id,
         role_profile_id=payload.role_profile_id,
         user_id=user_id,
+        is_panel_mode=payload.is_panel_mode,
     )
 
     detail = await service.get_interview_detail(interview.id)
@@ -171,6 +173,23 @@ async def upload_answer_audio(
     service: InterviewService = Depends(_get_interview_service),
 ) -> AnswerResponse:
     """Upload recorded audio and process transcript/metrics."""
+    from app.core.security import (
+        ALLOWED_MEDIA_MIME_TYPES,
+        MAX_UPLOAD_SIZE_BYTES,
+        validate_media_mime_type,
+        validate_media_size,
+    )
+
+    content_type = (audio_file.content_type or "audio/webm").split(";")[0].strip().lower()
+    if not validate_media_mime_type(content_type):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "code": "INVALID_MEDIA_TYPE",
+                "message": f"Unsupported media type '{content_type}'. Allowed types: {sorted(ALLOWED_MEDIA_MIME_TYPES)}",
+            },
+        )
+
     audio_data = await audio_file.read()
     if len(audio_data) == 0:
         raise HTTPException(
@@ -181,7 +200,15 @@ async def upload_answer_audio(
             },
         )
 
-    content_type = audio_file.content_type or "audio/webm"
+    if not validate_media_size(len(audio_data)):
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "PAYLOAD_TOO_LARGE",
+                "message": f"Uploaded file exceeds maximum limit of {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB.",
+            },
+        )
+
     answer = await service.upload_and_process_answer(
         interview_id=interview_id,
         answer_id=answer_id,
@@ -258,11 +285,16 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
             question_source=q.question_source,
             follow_up_depth=q.follow_up_depth,
             target_competency=q.target_competency,
+            interviewer_persona=getattr(q, "interviewer_persona", None),
+            persona_profile=get_persona_profile(getattr(q, "interviewer_persona", None)),
         )
-        for q in interview.questions
+        for q in getattr(interview, "questions", [])
     ]
 
     answers_res = [_to_answer_response(a) for a in getattr(interview, "answers", [])]
+    is_panel = getattr(interview, "interview_type", "").lower() == "panel" or any(
+        bool(getattr(q, "interviewer_persona", None)) for q in getattr(interview, "questions", [])
+    )
 
     return InterviewDetailResponse(
         id=interview.id,
@@ -272,6 +304,7 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
         difficulty_level=interview.difficulty_level,
         target_duration_minutes=interview.target_duration_minutes,
         current_question_index=interview.current_question_index,
+        is_panel_mode=is_panel,
         started_at=interview.started_at,
         completed_at=interview.completed_at,
         created_at=interview.created_at,

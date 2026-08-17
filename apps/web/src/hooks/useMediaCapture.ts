@@ -153,12 +153,25 @@ export function useMediaCapture({
           throw new Error("Camera/Microphone capture is not supported by your browser.");
         }
 
-        const constraints: MediaStreamConstraints = {
-          video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
-          audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
-        };
-
-        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        let mediaStream: MediaStream;
+        try {
+          const constraints: MediaStreamConstraints = {
+            video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
+            audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
+          };
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (vidErr) {
+          // If video requested but failed (e.g. no camera, camera in use, permission denied), fallback to audio-only
+          if (enableVideo && enableAudio) {
+            console.warn("Camera access failed, falling back to audio-only capture:", vidErr);
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: false,
+              audio: DEFAULT_CONSTRAINTS.audio,
+            });
+          } else {
+            throw vidErr;
+          }
+        }
 
         if (!mounted) {
           mediaStream.getTracks().forEach((track) => track.stop());

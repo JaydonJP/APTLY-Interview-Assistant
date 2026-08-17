@@ -29,6 +29,7 @@ import { EvidenceTimeline } from "@/components/evidence/EvidenceTimeline";
 import { RepairModeModal } from "@/components/repair/RepairModeModal";
 import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
 import { CompetencyCoverageMatrix } from "@/components/dna/CompetencyCoverageMatrix";
+import { DualPerspectivePanelCard } from "@/components/panel/DualPerspectivePanelCard";
 import type {
   ContentMetrics,
   EvidenceEvent,
@@ -219,6 +220,11 @@ export default function InterviewReviewPage() {
           />
         </section>
 
+        {/* Dual-Perspective Panel Evaluation Report */}
+        {review.panel_report && (
+          <DualPerspectivePanelCard panelReport={review.panel_report} />
+        )}
+
         {/* Next Rep & Measurement Notes */}
         <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6">
@@ -341,25 +347,42 @@ export default function InterviewReviewPage() {
             </div>
 
             <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
-              {review.questions_review.map((item, index) => (
-                <button
-                  key={item.question.id}
-                  type="button"
-                  onClick={() => selectQuestion(index)}
-                  className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
-                    selectedIndex === index
-                      ? "border-violet-300/35 bg-violet-300/12 text-white"
-                      : "border-white/8 bg-white/[0.03] text-slate-500 hover:text-white"
-                  }`}
-                >
-                  <span className="block text-[10px] uppercase tracking-wider">
-                    Question {item.question.sequence_number}
-                  </span>
-                  <span className="mt-1 block max-w-[9rem] truncate text-xs font-medium">
-                    {item.question.competency}
-                  </span>
-                </button>
-              ))}
+              {review.questions_review.map((item, index) => {
+                const persona = item.question.interviewer_persona;
+                const isHr = persona && String(persona).toUpperCase().includes("HR");
+                return (
+                  <button
+                    key={item.question.id}
+                    type="button"
+                    onClick={() => selectQuestion(index)}
+                    className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
+                      selectedIndex === index
+                        ? "border-violet-300/35 bg-violet-300/12 text-white"
+                        : "border-white/8 bg-white/[0.03] text-slate-500 hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="block text-[10px] uppercase tracking-wider">
+                        Question {item.question.sequence_number}
+                      </span>
+                      {persona && (
+                        <span
+                          className={`rounded px-1 text-[9px] font-bold ${
+                            isHr
+                              ? "bg-violet-950 text-violet-300 border border-violet-800/50"
+                              : "bg-cyan-950 text-cyan-300 border border-cyan-800/50"
+                          }`}
+                        >
+                          {isHr ? "HR" : "Tech"}
+                        </span>
+                      )}
+                    </div>
+                    <span className="mt-1 block max-w-[9rem] truncate text-xs font-medium">
+                      {item.question.competency}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="mt-5 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
@@ -386,9 +409,25 @@ export default function InterviewReviewPage() {
                   </span>
                 </div>
                 <div className="border-t border-white/8 p-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    Question {currentItem?.question.sequence_number}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      Question {currentItem?.question.sequence_number}
+                    </p>
+                    {currentItem?.question.interviewer_persona && (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider border ${
+                          String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
+                            ? "border-violet-500/40 bg-violet-950/60 text-violet-300"
+                            : "border-cyan-500/40 bg-cyan-950/60 text-cyan-300"
+                        }`}
+                      >
+                        Asked by{" "}
+                        {String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
+                          ? "Sarah Chen (HR Lead)"
+                          : "Alex Rivera (Tech Lead)"}
+                      </span>
+                    )}
+                  </div>
                   <p className="mt-2 text-sm leading-6 text-slate-200">{currentItem?.question.question_text}</p>
                 </div>
               </div>

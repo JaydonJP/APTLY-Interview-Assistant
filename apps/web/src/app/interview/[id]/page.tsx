@@ -8,10 +8,7 @@ import { AudioVisualizer } from "@/components/audio/AudioVisualizer";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { RecordingConsentModal } from "@/components/interview/RecordingConsentModal";
-import {
-  RecordingDiagnostics,
-  RecordingQualityPanel,
-} from "@/components/camera/RecordingQualityPanel";
+import { PanelInterviewerDeck } from "@/components/panel/PanelInterviewerDeck";
 import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
 import { apiClient } from "@/lib/api-client";
@@ -145,29 +142,34 @@ export default function LiveInterviewRoomPage() {
   const isLastQuestion = currentQIndex >= totalQuestions;
 
   // Auto-Start Recording Trigger when Question becomes active & TTS completes
+  // NOTE: We key on currentQuestion?.id so this effect re-fires exactly once per new question.
   useEffect(() => {
-    if (!hasConsent || isRecording || recordedBlob || isSubmitting || currentAnswer) {
-      return;
-    }
+    if (!hasConsent || !currentQuestion) return;
+    // Don't re-trigger if already recording, have a blob, submitting, or answer exists
+    if (isRecording || recordedBlob || isSubmitting || currentAnswer) return;
+
+    let cancelled = false;
+    let countdownTimer: NodeJS.Timeout | null = null;
 
     // Play TTS audio or speech synthesizer for question
-    if (currentQuestion && typeof window !== "undefined" && "speechSynthesis" in window) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       setIsTtsPlaying(true);
       window.speechSynthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(currentQuestion.question_text);
-      utterance.rate = 1.05;
-      utterance.pitch = 1.0;
+      const isHr = String(currentQuestion.interviewer_persona || "").toUpperCase().includes("HR");
+      utterance.pitch = isHr ? 1.15 : 0.92;
+      utterance.rate = isHr ? 1.0 : 1.05;
 
       utterance.onend = () => {
+        if (cancelled) return;
         setIsTtsPlaying(false);
-        // 400ms pre-roll preparation countdown before starting
         setAutoRecordCountdown(3);
-        const timer = setInterval(() => {
+        countdownTimer = setInterval(() => {
           setAutoRecordCountdown((prev) => {
-            if (prev === null || prev <= 1) {
-              clearInterval(timer);
-              void startRecording();
+            if (cancelled || prev === null || prev <= 1) {
+              if (countdownTimer) clearInterval(countdownTimer);
+              if (!cancelled) void startRecording();
               return null;
             }
             return prev - 1;
@@ -176,21 +178,24 @@ export default function LiveInterviewRoomPage() {
       };
 
       utterance.onerror = () => {
+        if (cancelled) return;
         setIsTtsPlaying(false);
         void startRecording();
       };
 
       window.speechSynthesis.speak(utterance);
     }
-  }, [
-    currentAnswer,
-    currentQuestion,
-    hasConsent,
-    isRecording,
-    isSubmitting,
-    recordedBlob,
-    startRecording,
-  ]);
+
+    // Cleanup: cancel TTS and pending countdown if deps change (e.g., question advances)
+    return () => {
+      cancelled = true;
+      if (countdownTimer) clearInterval(countdownTimer);
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentQuestion?.id, hasConsent]);
 
   // Enforce Maximum Answer Duration (180s)
   useEffect(() => {
@@ -258,12 +263,20 @@ export default function LiveInterviewRoomPage() {
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    // Cancel any running TTS and reset TTS/countdown UI state immediately
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsTtsPlaying(false);
+    setAutoRecordCountdown(null);
+
     try {
       const updated = await apiClient.post<InterviewDetail>(
         `/api/v1/interviews/${interviewId}/next-question`,
       );
       setInterview(updated);
       setCurrentAnswer(null);
+      // Reset recording state so VideoPreview switches back to live camera
       resetRecording();
 
       // If completed, redirect to review
@@ -294,48 +307,6 @@ export default function LiveInterviewRoomPage() {
       setIsSubmitting(false);
     }
   };
-
-  // Build Diagnostics object for Dev Quality Panel
-  const diagnosticsData: RecordingDiagnostics = useMemo(
-    () => ({
-      micState: isMicReady ? "CONNECTED" : "DISCONNECTED",
-      audioTrackState,
-      cameraState: isCameraReady ? "CONNECTED" : "DISCONNECTED",
-      videoTrackState,
-      recordingState: isRecording
-        ? "RECORDING"
-        : isSubmitting
-        ? "PROCESSING"
-        : currentAnswer?.status === "transcribed"
-        ? "PROCESSED"
-        : "READY",
-      mimeType,
-      codec: "opus,vp9",
-      blobSizeBytes: recordedBlob?.size || 0,
-      durationSeconds: recordingDuration,
-      sha256Hash,
-      micLevelPercent,
-      audioStreamDetected: isMicReady && audioTrackState === "LIVE",
-      normalizedFormat: "16kHz Mono PCM WAV",
-      whisperStatus: currentAnswer?.status === "transcribed" ? "COMPLETED" : "PENDING",
-      transcriptWordCount: currentAnswer?.transcript?.word_count || 0,
-      geminiStatus: currentAnswer?.status === "transcribed" ? "COMPLETED" : "PENDING",
-    }),
-    [
-      isMicReady,
-      audioTrackState,
-      isCameraReady,
-      videoTrackState,
-      isRecording,
-      isSubmitting,
-      currentAnswer,
-      mimeType,
-      recordedBlob,
-      recordingDuration,
-      sha256Hash,
-      micLevelPercent,
-    ],
-  );
 
   if (isLoading) {
     return (
@@ -433,12 +404,31 @@ export default function LiveInterviewRoomPage() {
 
       {/* ── MAIN INTERVIEW SPLIT CONSOLE ──────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Active Question */}
+        {/* Left Column: Panel Deck & Active Question */}
         <div className="lg:col-span-6 space-y-6">
-          <Card className="glass-panel-glow p-8 min-h-[420px] flex flex-col justify-between">
+          {/* Active AI Interviewer Panel Deck */}
+          <PanelInterviewerDeck
+            activePersona={currentQuestion?.interviewer_persona}
+            isTtsPlaying={isTtsPlaying}
+          />
+
+          <Card className="glass-panel-glow p-8 min-h-[380px] flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {currentQuestion?.interviewer_persona && (
+                    <span
+                      className={`rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-wider ${
+                        String(currentQuestion.interviewer_persona).toUpperCase().includes("HR")
+                          ? "border-violet-500/40 bg-violet-950/60 text-violet-300"
+                          : "border-cyan-500/40 bg-cyan-950/60 text-cyan-300"
+                      }`}
+                    >
+                      {String(currentQuestion.interviewer_persona).toUpperCase().includes("HR")
+                        ? "Sarah Chen · HR"
+                        : "Alex Rivera · Tech"}
+                    </span>
+                  )}
                   <span className="rounded-md border border-indigo-500/40 bg-indigo-950/60 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-300">
                     {currentQuestion?.category || "Technical"}
                   </span>
@@ -454,7 +444,7 @@ export default function LiveInterviewRoomPage() {
                 {isTtsPlaying && (
                   <span className="flex items-center gap-1 text-xs font-mono text-cyan-400 animate-pulse">
                     <Volume2 className="h-3.5 w-3.5" />
-                    Speaking Question...
+                    Speaking...
                   </span>
                 )}
                 {autoRecordCountdown !== null && (
@@ -661,9 +651,6 @@ export default function LiveInterviewRoomPage() {
           </button>
         )}
       </div>
-
-      {/* ── DEV QUALITY & RECORDING DIAGNOSTICS PANEL ──────────────── */}
-      <RecordingQualityPanel diagnostics={diagnosticsData} />
     </AppShell>
   );
 }

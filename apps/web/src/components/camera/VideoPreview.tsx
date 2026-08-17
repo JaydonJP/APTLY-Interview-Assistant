@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Camera, Mic, VideoOff } from "lucide-react";
 
 interface VideoPreviewProps {
@@ -34,6 +34,22 @@ export function VideoPreview({
     [stream, recordedUrl],
   );
 
+  // Re-attach live stream whenever recordedUrl is cleared (e.g., after question switch / re-record)
+  useEffect(() => {
+    const node = videoRef.current;
+    if (!node) return;
+    if (!recordedUrl && stream) {
+      // Only re-attach if not already showing the correct stream
+      if (node.srcObject !== stream) {
+        node.srcObject = stream;
+        node.play().catch(() => {});
+      }
+    } else if (recordedUrl) {
+      // Clear srcObject so the <video src=...> playback takes over
+      node.srcObject = null;
+    }
+  }, [recordedUrl, stream]);
+
   return (
     <div
       className={`relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/90 shadow-2xl backdrop-blur-xl ${
@@ -43,7 +59,7 @@ export function VideoPreview({
       {/* Live Stream or Recorded Playback */}
       <div className="relative aspect-video w-full overflow-hidden bg-slate-950">
         {!recordedUrl ? (
-          stream ? (
+          stream && isCameraReady ? (
             <video
               ref={handleVideoMount}
               autoPlay
@@ -51,10 +67,26 @@ export function VideoPreview({
               playsInline
               className="h-full w-full object-cover -scale-x-100"
             />
+          ) : stream && isMicReady ? (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-gradient-to-b from-slate-900 via-slate-950 to-slate-950 p-6 text-center">
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl border border-indigo-500/30 bg-indigo-950/40 text-indigo-300 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+                <Mic className="h-8 w-8 animate-pulse" />
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500" />
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">Audio-Only Mode Active</p>
+                <p className="mt-1 text-xs text-slate-400 font-mono">
+                  Camera unavailable • Speech transcription & audio analysis active
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-slate-500">
               <VideoOff className="h-10 w-10 text-slate-600" />
-              <p className="text-xs font-mono">Initializing Camera Preview...</p>
+              <p className="text-xs font-mono">Audio & Video Engine Ready</p>
             </div>
           )
         ) : (

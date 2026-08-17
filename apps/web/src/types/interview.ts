@@ -62,6 +62,8 @@ export interface Job {
   created_at: string;
 }
 
+import type { PersonaProfile } from "./panel";
+
 export interface Question {
   id: string;
   interview_id: string;
@@ -78,6 +80,8 @@ export interface Question {
   question_source?: "initial" | "follow_up" | string;
   follow_up_depth?: number;
   target_competency?: string;
+  interviewer_persona?: "HR_LEAD" | "TECH_LEAD" | string | null;
+  persona_profile?: PersonaProfile | null;
 }
 
 export interface FillerOccurrence {
@@ -221,6 +225,7 @@ export interface InterviewDetail {
   difficulty_level: string;
   target_duration_minutes: number;
   current_question_index: number;
+  is_panel_mode?: boolean;
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
@@ -246,6 +251,7 @@ export interface InterviewReview {
     difficulty_level: string;
     target_duration_minutes: number;
     current_question_index: number;
+    is_panel_mode?: boolean;
     started_at?: string | null;
     completed_at?: string | null;
     created_at: string;
@@ -262,12 +268,15 @@ export interface InterviewReview {
   average_technical_depth_score?: number;
   questions_review: QuestionReviewItem[];
   report_card?: InterviewReportCard | null;
+  panel_report?: PanelInterviewReport | null;
 }
 
 import type { EvidenceEvent } from "./evidence";
 import type { BehavioralAnswerDNA, SessionCompetencyCoverage, TechnicalAnswerDNA } from "./dna";
+import type { PanelInterviewReport } from "./panel";
 export * from "./evidence";
 export * from "./dna";
+export * from "./panel";
 
 export interface QuestionReviewItem {
   question: Question;

@@ -19,6 +19,7 @@ from app.schemas.content_intelligence import (
     StarAnalysis,
 )
 from app.schemas.jobs import RoleProfileResponse
+from app.schemas.panel import PanelInterviewReport, PersonaProfile
 
 # ── Question Schemas ──────────────────────────────────────────────────────────
 
@@ -41,6 +42,8 @@ class QuestionResponse(AptlyBaseModel):
     question_source: str = "initial"
     follow_up_depth: int = 0
     target_competency: str = ""
+    interviewer_persona: str | None = None
+    persona_profile: PersonaProfile | None = None
 
 
 # ── Transcript & Speech Metrics Schemas ───────────────────────────────────────
@@ -165,11 +168,12 @@ class InterviewCreateRequest(AptlyBaseModel):
     )
     title: str = Field(default="Practice Interview", max_length=255)
     interview_type: str = Field(
-        default="mixed", description="mixed, technical, behavioral"
+        default="mixed", description="mixed, technical, behavioral, panel"
     )
     difficulty_level: str = Field(default="medium", description="easy, medium, hard")
     target_duration_minutes: int = Field(default=10, ge=3, le=60)
     question_count: int = Field(default=3, ge=1, le=10)
+    is_panel_mode: bool = Field(default=False, description="Enable Dual-Persona AI Panel Mode.")
 
 
 class InterviewResponse(VersionedSchema):
@@ -182,6 +186,7 @@ class InterviewResponse(VersionedSchema):
     difficulty_level: str
     target_duration_minutes: int
     current_question_index: int
+    is_panel_mode: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -281,3 +286,5 @@ class InterviewReviewResponse(VersionedSchema):
     average_technical_depth_score: float = 0.0
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)
     report_card: InterviewReportCard | None = None
+    panel_report: PanelInterviewReport | None = None
+

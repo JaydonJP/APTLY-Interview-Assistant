@@ -13,6 +13,8 @@ from uuid import UUID
 from app.core.logging import get_logger
 from app.models.job import RoleProfile
 from app.models.question import Question
+from app.schemas.panel import InterviewerPersona
+from app.services.panel_service import PanelInterviewService
 from app.services.providers.base import LLMProvider, LLMStructuredRequest
 
 logger = get_logger(__name__)
@@ -23,10 +25,12 @@ PROMPT_VERSION = "question_generation/v1"
 class QuestionGeneratorService:
     """
     Generates dynamic interview questions tailored to a specific RoleProfile.
+    Supports single-interviewer and dual-persona Panel Mode (HR Lead + Tech Lead).
     """
 
     def __init__(self, llm_provider: LLMProvider) -> None:
         self.llm_provider = llm_provider
+        self.panel_service = PanelInterviewService()
 
     async def generate_questions(
         self,
@@ -36,17 +40,21 @@ class QuestionGeneratorService:
         difficulty_level: str = "medium",
         question_count: int = 3,
         twin_profile: Any | None = None,
+        is_panel_mode: bool = False,
     ) -> list[Question]:
         """
         Generate structured Question ORM entities for an interview session,
         incorporating previous session weaknesses and coaching history from the Interview Twin.
+        Assigns active interviewer personas when in Panel Mode.
         """
+        is_panel = is_panel_mode or interview_type.lower() == "panel"
         logger.info(
             "question_generation_started",
             interview_id=str(interview_id),
             role_title=role_profile.role_title,
             count=question_count,
             type=interview_type,
+            is_panel_mode=is_panel,
             has_twin_context=bool(twin_profile),
         )
 
@@ -59,15 +67,24 @@ class QuestionGeneratorService:
                     "difficulty": "easy | medium | hard",
                     "question_text": "string",
                     "expected_topics": ["string"],
+                    "interviewer_persona": "HR_LEAD | TECH_LEAD",
                 }
             ]
         }
 
-        system_prompt = (
-            "You are a technical interviewer at a top tier technology company. "
-            f"Generate {question_count} tailored interview questions for a {role_profile.seniority} {role_profile.role_title}. "
-            f"Interview Type: {interview_type}. Difficulty: {difficulty_level}."
-        )
+        if is_panel:
+            system_prompt = (
+                "You are conducting a dual-interviewer Panel Interview with two distinct personas:\n"
+                "1. Sarah Chen (HR Lead & People Partner): Friendly, empathetic tone. Evaluates STAR behavioral stories, leadership, conflict resolution, ownership, and core motivation.\n"
+                "2. Alex Rivera (Staff Systems Architect & Tech Lead): Skeptical, rigorous tone. Evaluates distributed systems design, concurrency, database indexing, latency tradeoffs, failure modes, and empirical benchmarking.\n"
+                f"Generate {question_count} tailored interview questions for a {role_profile.seniority} {role_profile.role_title}, alternating between Sarah Chen (HR_LEAD) and Alex Rivera (TECH_LEAD)."
+            )
+        else:
+            system_prompt = (
+                "You are a technical interviewer at a top tier technology company. "
+                f"Generate {question_count} tailored interview questions for a {role_profile.seniority} {role_profile.role_title}. "
+                f"Interview Type: {interview_type}. Difficulty: {difficulty_level}."
+            )
 
         user_prompt = (
             f"Role Profile:\n"
@@ -91,19 +108,23 @@ class QuestionGeneratorService:
 
         user_prompt += f"\nGenerate exactly {question_count} distinct questions."
 
-        raw_result = await self.llm_provider.generate_structured(
-            LLMStructuredRequest(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                output_schema=schema,
+        try:
+            raw_result = await self.llm_provider.generate_structured(
+                LLMStructuredRequest(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    output_schema=schema,
+                )
             )
-        )
+        except Exception as exc:
+            logger.warning("question_generator_llm_failed_using_deterministic_fallback", error=str(exc))
+            raw_result = {"_mock": True, "fallback": True}
 
         # Parse or synthesize question definitions
         question_defs = self._parse_or_synthesize(
             raw_result=raw_result,
             role_profile=role_profile,
-            interview_type=interview_type,
+            interview_type="mixed" if is_panel else interview_type,
             difficulty_level=difficulty_level,
             question_count=question_count,
             twin_profile=twin_profile,
@@ -111,16 +132,19 @@ class QuestionGeneratorService:
 
         questions: list[Question] = []
         for idx, q_data in enumerate(question_defs, start=1):
+            category = q_data["category"]
+            persona = q_data.get("interviewer_persona") or self.panel_service.assign_persona(category, idx)
             q = Question(
                 interview_id=interview_id,
                 sequence_number=idx,
-                category=q_data["category"],
+                category=category,
                 question_type=q_data["question_type"],
                 competency=q_data["competency"],
                 difficulty=q_data["difficulty"],
                 question_text=q_data["question_text"],
                 expected_topics=q_data["expected_topics"],
                 prompt_version=PROMPT_VERSION,
+                interviewer_persona=persona.value if isinstance(persona, InterviewerPersona) else str(persona),
             )
             questions.append(q)
 
@@ -131,6 +155,7 @@ class QuestionGeneratorService:
         )
 
         return questions
+
 
     def _parse_or_synthesize(
         self,

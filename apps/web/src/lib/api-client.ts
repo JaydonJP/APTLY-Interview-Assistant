@@ -12,8 +12,7 @@ import type { ErrorResponse } from "@/types/api";
 import { supabase } from "./supabase";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? "" : "http://127.0.0.1:8000");
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
@@ -85,12 +84,16 @@ interface RequestOptions extends RequestInit {
 
 async function getAuthHeader(): Promise<string | null> {
   try {
-    const { data } = await supabase.auth.getSession();
-    if (data?.session?.access_token) {
-      return `Bearer ${data.session.access_token}`;
+    const sessionPromise = supabase.auth.getSession();
+    // Race against a 1-second timeout so Supabase never blocks API calls
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
+    const result = await Promise.race([sessionPromise, timeoutPromise]);
+    if (result && typeof result === "object" && "data" in result) {
+      const token = (result as { data: { session?: { access_token?: string } } }).data?.session?.access_token;
+      if (token) return `Bearer ${token}`;
     }
   } catch {
-    // Ignore error in server context
+    // Ignore Supabase errors — API works without auth in dev/mock mode
   }
   return null;
 }
