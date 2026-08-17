@@ -42,15 +42,40 @@ async function parseErrorResponse(
   response: Response,
 ): Promise<ErrorResponse["error"]> {
   try {
-    const data = (await response.json()) as ErrorResponse;
-    return data.error;
+    const data = (await response.json()) as any;
+    if (data && typeof data === "object") {
+      if (data.error && typeof data.error === "object") {
+        return {
+          code: data.error.code || "API_ERROR",
+          message: data.error.message || response.statusText || "Request failed",
+          request_id: data.error.request_id || response.headers.get("x-request-id") || "",
+        };
+      }
+      if (data.detail) {
+        const detailMsg =
+          typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+        return {
+          code: `HTTP_${response.status}`,
+          message: detailMsg,
+          request_id: response.headers.get("x-request-id") || "",
+        };
+      }
+      if (data.message) {
+        return {
+          code: data.code || `HTTP_${response.status}`,
+          message: data.message,
+          request_id: response.headers.get("x-request-id") || "",
+        };
+      }
+    }
   } catch {
-    return {
-      code: "UNKNOWN_ERROR",
-      message: response.statusText || "An unknown error occurred",
-      request_id: response.headers.get("x-request-id") ?? "",
-    };
+    // Fallback to response status text
   }
+  return {
+    code: `HTTP_${response.status || "UNKNOWN"}`,
+    message: response.statusText || "An unknown error occurred",
+    request_id: response.headers.get("x-request-id") ?? "",
+  };
 }
 
 interface RequestOptions extends RequestInit {
