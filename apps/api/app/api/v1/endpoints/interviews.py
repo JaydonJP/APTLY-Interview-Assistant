@@ -11,9 +11,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import get_idempotency_key
+from app.core.security import AuthenticatedUser
 from app.dependencies import (
     get_db,
     get_llm_provider,
+    get_optional_current_user,
     get_storage,
     get_transcription_provider,
 )
@@ -49,6 +51,22 @@ def _get_interview_service(
     )
 
 
+@router.get(
+    "",
+    response_model=list[InterviewDetailResponse],
+    summary="List interviews",
+    description="Lists interviews created by the current user (or public practice sessions).",
+)
+async def list_interviews(
+    service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
+) -> list[InterviewDetailResponse]:
+    """Retrieve list of interviews for the authenticated user."""
+    user_id = user.id if user else None
+    interviews = await service.list_interviews(user_id=user_id)
+    return [_to_detail_response(inv) for inv in interviews]
+
+
 @router.post(
     "",
     response_model=InterviewDetailResponse,
@@ -59,9 +77,11 @@ def _get_interview_service(
 async def create_interview(
     payload: InterviewCreateRequest,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
     idempotency_key: UUID | None = Depends(get_idempotency_key),
 ) -> InterviewDetailResponse:
     """Create a new practice interview session."""
+    user_id = user.id if user else None
     interview = await service.create_interview(
         title=payload.title,
         interview_type=payload.interview_type,
@@ -70,6 +90,7 @@ async def create_interview(
         question_count=payload.question_count,
         job_id=payload.job_id,
         role_profile_id=payload.role_profile_id,
+        user_id=user_id,
     )
 
     detail = await service.get_interview_detail(interview.id)

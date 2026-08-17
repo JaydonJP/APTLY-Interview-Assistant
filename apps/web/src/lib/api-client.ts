@@ -9,6 +9,7 @@
  */
 
 import type { ErrorResponse } from "@/types/api";
+import { supabase } from "./supabase";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -54,18 +55,36 @@ async function parseErrorResponse(
 
 interface RequestOptions extends RequestInit {
   requestId?: string;
+  token?: string;
+}
+
+async function getAuthHeader(): Promise<string | null> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (data?.session?.access_token) {
+      return `Bearer ${data.session.access_token}`;
+    }
+  } catch {
+    // Ignore error in server context
+  }
+  return null;
 }
 
 async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { requestId, ...fetchOptions } = options;
+  const { requestId, token, ...fetchOptions } = options;
 
   const headers = new Headers(fetchOptions.headers);
   headers.set("Content-Type", "application/json");
   if (requestId) {
     headers.set("X-Request-ID", requestId);
+  }
+
+  const authHeader = token ? `Bearer ${token}` : await getAuthHeader();
+  if (authHeader && !headers.has("Authorization")) {
+    headers.set("Authorization", authHeader);
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -113,9 +132,16 @@ export const apiClient = {
     request<T>(path, { method: "DELETE", ...options }),
 
   upload: async <T>(path: string, formData: FormData): Promise<T> => {
+    const headers = new Headers();
+    const authHeader = await getAuthHeader();
+    if (authHeader) {
+      headers.set("Authorization", authHeader);
+    }
+
     const response = await fetch(`${API_BASE_URL}${path}`, {
       method: "POST",
       body: formData,
+      headers,
     });
 
     if (!response.ok) {
@@ -131,3 +157,4 @@ export const apiClient = {
     return response.json() as Promise<T>;
   },
 };
+

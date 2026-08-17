@@ -8,6 +8,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { BarChart2, Home, PlusCircle, ShieldCheck } from "lucide-react";
+import { UserMenu } from "@/components/auth/UserMenu";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -54,9 +55,13 @@ export function Navbar() {
             ))}
           </ul>
         </nav>
-        <div className="hidden items-center gap-2 text-xs text-slate-500 md:flex">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
-          <span>Private by design</span>
+
+        <div className="flex items-center gap-4">
+          <div className="hidden items-center gap-2 text-xs text-slate-500 lg:flex">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
+            <span>Private by design</span>
+          </div>
+          <UserMenu />
         </div>
       </div>
     </header>

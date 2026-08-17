@@ -208,6 +208,9 @@ class QuestionReviewItem(AptlyBaseModel):
     content_metrics: ContentMetricsResponse | None = None
 
 
+from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+
+
 class ReportHabit(AptlyBaseModel):
     """One prioritized coaching habit with an evidence-backed drill."""
 
@@ -218,23 +221,12 @@ class ReportHabit(AptlyBaseModel):
     impact: str
     drill_title: str
     drill_instructions: str
+    evidence_event_ids: list[str] = Field(
+        default_factory=list,
+        description="IDs of evidence events grounding this habit recommendation",
+    )
     evidence_start_seconds: float | None = None
     evidence_end_seconds: float | None = None
-
-
-class EvidenceEvent(AptlyBaseModel):
-    """Replayable event in the report timeline."""
-
-    id: str
-    type: str
-    title: str
-    description: str
-    start_seconds: float = Field(ge=0.0)
-    end_seconds: float = Field(ge=0.0)
-    severity: int = Field(default=1, ge=1, le=5)
-    reliability: float | None = Field(default=None, ge=0.0, le=1.0)
-    question_number: int | None = None
-    quote: str | None = None
 
 
 class DeliveryOverview(AptlyBaseModel):

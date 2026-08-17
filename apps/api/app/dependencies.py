@@ -252,3 +252,51 @@ async def get_transcription_provider(
         settings.whisperx_device,
         settings.whisperx_compute_type,
     )
+
+
+# ── Supabase Authentication ───────────────────────────────────────────────────
+
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Header, HTTPException, status
+from app.core.security import AuthenticatedUser, decode_supabase_token
+
+security_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuthenticatedUser | None:
+    """
+    FastAPI dependency: returns the authenticated user if Bearer token is provided,
+    otherwise None. Does not raise 401.
+    """
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+
+    if not token:
+        return None
+
+    return decode_supabase_token(token)
+
+
+async def get_current_user(
+    user: Annotated[AuthenticatedUser | None, Depends(get_optional_current_user)],
+) -> AuthenticatedUser:
+    """
+    FastAPI dependency: requires valid authentication. Raises HTTP 401 if missing/invalid.
+    """
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "UNAUTHORIZED",
+                "message": "Authentication required. Please sign in to access your interview data.",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+

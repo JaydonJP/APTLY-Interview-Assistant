@@ -264,6 +264,9 @@ export interface InterviewReview {
   report_card?: InterviewReportCard | null;
 }
 
+import type { EvidenceEvent } from "./evidence";
+export * from "./evidence";
+
 export interface ReportHabit {
   id: string;
   title: string;
@@ -272,21 +275,9 @@ export interface ReportHabit {
   impact: string;
   drill_title: string;
   drill_instructions: string;
+  evidence_event_ids?: string[];
   evidence_start_seconds?: number | null;
   evidence_end_seconds?: number | null;
-}
-
-export interface EvidenceEvent {
-  id: string;
-  type: string;
-  title: string;
-  description: string;
-  start_seconds: number;
-  end_seconds: number;
-  severity: number;
-  reliability?: number | null;
-  question_number?: number | null;
-  quote?: string | null;
 }
 
 export interface DeliveryOverview {

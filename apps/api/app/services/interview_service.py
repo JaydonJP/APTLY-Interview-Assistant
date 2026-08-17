@@ -116,6 +116,7 @@ class InterviewService:
         question_count: int = 3,
         job_id: UUID | None = None,
         role_profile_id: UUID | None = None,
+        user_id: str | None = None,
     ) -> Interview:
         """Create and configure a new interview session with generated questions."""
         # 1. Fetch role profile if provided
@@ -132,6 +133,7 @@ class InterviewService:
             job = Job(
                 raw_text="Generic Software Engineering Practice Interview",
                 title=title,
+                user_id=user_id,
             )
             self.db.add(job)
             await self.db.flush()
@@ -156,6 +158,7 @@ class InterviewService:
             title=title or role_profile.role_title,
             job_id=role_profile.job_id,
             role_profile_id=role_profile.id,
+            user_id=user_id,
             status="created",
             interview_type=interview_type,
             difficulty_level=difficulty_level,
@@ -187,6 +190,26 @@ class InterviewService:
             status=interview.status,
         )
         return interview
+
+    async def list_interviews(
+        self, user_id: str | None = None, limit: int = 50
+    ) -> list[Interview]:
+        """Fetch list of interviews, optionally filtered by user_id."""
+        stmt = (
+            select(Interview)
+            .options(
+                selectinload(Interview.role_profile),
+                selectinload(Interview.questions),
+                selectinload(Interview.answers),
+            )
+            .order_by(Interview.created_at.desc())
+            .limit(limit)
+        )
+        if user_id:
+            stmt = stmt.where(Interview.user_id == user_id)
+
+        res = await self.db.execute(stmt)
+        return list(res.scalars().all())
 
     async def get_interview_detail(self, interview_id: UUID) -> Interview | None:
         """Fetch full interview entity with eager-loaded relationships."""
@@ -546,6 +569,7 @@ class InterviewService:
 
     @staticmethod
     def _build_report_card(
+        session_id: str,
         questions_review: list[dict[str, Any]],
         average_content_score: float,
         average_wpm: float,
@@ -553,177 +577,311 @@ class InterviewService:
         total_fillers: int,
         total_pauses: int,
     ) -> dict[str, Any]:
-        """Assemble the evidence-first report card from persisted signals.
+        """Assemble the evidence-first report card with universal EvidenceEvent contracts.
 
-        Speech metrics are deterministic. Semantic scores come from the
-        structured content evaluator. The report intentionally leaves vision
-        and voice-energy fields unavailable until those signals are actually
-        captured, rather than inventing precision.
+        Speech metrics are deterministic (MEASURED/DERIVED). Semantic scores come from the
+        structured content evaluator (AI_EVALUATED). Every report insight is strictly traceable
+        to one or more evidence events.
         """
-        evidence_events: list[dict[str, Any]] = []
+        from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+
+        evidence_events: list[EvidenceEvent] = []
         habits: list[dict[str, Any]] = []
         strengths: list[str] = []
 
         for item in questions_review:
             question = item["question"]
             question_number = question["sequence_number"]
+            turn_id = str((item.get("answer") or {}).get("id") or question["id"])
             speech = item.get("speech_metrics") or {}
             content = item.get("content_metrics") or {}
+            ans_duration = float((item.get("answer") or {}).get("duration_seconds", 0.0))
 
+            # 1. Measured Filler Word Events
             for index, filler in enumerate(speech.get("filler_words", [])):
                 start = float(filler.get("timestamp_seconds", 0.0))
                 end = start + float(filler.get("duration_seconds", 0.2))
-                evidence_events.append(
-                    {
-                        "id": f"filler-{question_number}-{index}",
-                        "type": "filler",
-                        "title": f'Filler word: {filler.get("word", "filler")}',
-                        "description": "A filler word appeared in the answer.",
-                        "start_seconds": start,
-                        "end_seconds": end,
-                        "severity": 3,
-                        "reliability": 0.99,
+                start_ms = max(0, int(start * 1000))
+                end_ms = max(start_ms, int(end * 1000))
+                evt = EvidenceEvent(
+                    id=f"evt-filler-{question_number}-{index}",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=EvidenceEventType.FILLER,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    severity=3,
+                    reliability=0.99,
+                    title=f'Filler word: "{filler.get("word", "filler")}"',
+                    explanation="Filler words impact delivery flow and reduce perceived confidence.",
+                    payload={
+                        "word": filler.get("word"),
                         "question_number": question_number,
                         "quote": filler.get("word"),
-                    }
+                    },
+                    source=EvidenceSource.MEASURED,
                 )
+                evidence_events.append(evt)
 
+            # 2. Measured Pause Events
             for index, pause in enumerate(speech.get("pauses", [])):
                 start = float(pause.get("start_seconds", 0.0))
                 end = float(pause.get("end_seconds", start))
-                evidence_events.append(
-                    {
-                        "id": f"pause-{question_number}-{index}",
-                        "type": "pause",
-                        "title": f'Long pause: {end - start:.1f}s',
-                        "description": "A sustained gap between words was detected.",
-                        "start_seconds": start,
-                        "end_seconds": end,
-                        "severity": 2,
-                        "reliability": 0.98,
+                start_ms = max(0, int(start * 1000))
+                end_ms = max(start_ms, int(end * 1000))
+                duration_sec = round(end - start, 2)
+                evt = EvidenceEvent(
+                    id=f"evt-pause-{question_number}-{index}",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=EvidenceEventType.PAUSE,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    severity=2,
+                    reliability=0.98,
+                    title=f"Extended pause ({duration_sec}s)",
+                    explanation="A sustained silent gap was detected between transcript segments.",
+                    payload={
+                        "duration_seconds": duration_sec,
                         "question_number": question_number,
-                    }
+                    },
+                    source=EvidenceSource.MEASURED,
                 )
+                evidence_events.append(evt)
 
+            # 3. Derived Pace Shift Events
+            wpm = float(speech.get("wpm", 0.0))
+            if wpm > 0 and not (130 <= wpm <= 160):
+                evt = EvidenceEvent(
+                    id=f"evt-pace-{question_number}",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=EvidenceEventType.PACE_SHIFT,
+                    start_ms=0,
+                    end_ms=max(0, int(ans_duration * 1000)),
+                    severity=3,
+                    reliability=0.95,
+                    title=f"Pace out of range ({wpm:.0f} WPM)",
+                    explanation=f"Speaking rate of {wpm:.0f} WPM deviated from the optimal 130-160 WPM interview coaching band.",
+                    payload={
+                        "wpm": wpm,
+                        "target_band_min": 130,
+                        "target_band_max": 160,
+                        "question_number": question_number,
+                    },
+                    source=EvidenceSource.DERIVED,
+                )
+                evidence_events.append(evt)
+
+            # 4. Semantic Evidence Anchors (Strong Evidence)
             for index, evidence in enumerate(content.get("evidence", [])):
                 start = float(evidence.get("start_seconds", 0.0))
                 end = float(evidence.get("end_seconds", start))
-                evidence_events.append(
-                    {
-                        "id": f'evidence-{question_number}-{evidence.get("id", index)}',
-                        "type": str(evidence.get("type", "evidence")).lower(),
-                        "title": "Evidence anchor",
-                        "description": "Semantic feedback linked to an exact transcript span.",
-                        "start_seconds": start,
-                        "end_seconds": max(start, end),
-                        "severity": 1,
-                        "reliability": float(evidence.get("confidence", 0.8)),
-                        "question_number": question_number,
+                start_ms = max(0, int(start * 1000))
+                end_ms = max(start_ms, int(end * 1000))
+                evt_type = (
+                    EvidenceEventType.STRONG_EVIDENCE
+                    if str(evidence.get("type", "")).upper() == "STRENGTH"
+                    else EvidenceEventType.STRONG_EVIDENCE
+                )
+                evt = EvidenceEvent(
+                    id=f"evt-anchor-{question_number}-{evidence.get('id', index)}",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=evt_type,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    severity=1,
+                    reliability=float(evidence.get("confidence", 0.85)),
+                    title="Grounded evidence anchor",
+                    explanation="Specific transcript segment demonstrating domain experience and competency.",
+                    payload={
                         "quote": evidence.get("text"),
+                        "type": evidence.get("type"),
+                        "question_number": question_number,
+                    },
+                    source=EvidenceSource.AI_EVALUATED,
+                )
+                evidence_events.append(evt)
+
+            # 5. Unsupported Claims
+            for index, claim in enumerate(content.get("claims", [])):
+                support_status = claim.get("support_status")
+                if support_status in {"UNSUPPORTED", "PARTIALLY_SUPPORTED"}:
+                    start = float(claim.get("start_seconds", 0.0))
+                    end = float(claim.get("end_seconds", start + 1.0))
+                    start_ms = max(0, int(start * 1000))
+                    end_ms = max(start_ms, int(end * 1000))
+                    claim_evt_id = f"evt-claim-{question_number}-{index}"
+                    claim_evt = EvidenceEvent(
+                        id=claim_evt_id,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                        type=EvidenceEventType.UNSUPPORTED_CLAIM,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        severity=5 if support_status == "UNSUPPORTED" else 4,
+                        reliability=0.90,
+                        title="Substantiate measurable claim",
+                        explanation=f"A measurable claim was made without baseline or validation: '{claim.get('claim', '')}'",
+                        payload={
+                            "claim": claim.get("claim"),
+                            "support_status": support_status,
+                            "question_number": question_number,
+                            "quote": claim.get("claim"),
+                        },
+                        source=EvidenceSource.AI_EVALUATED,
+                    )
+                    evidence_events.append(claim_evt)
+
+                    habits.append(
+                        {
+                            "id": f"habit-claim-{question_number}-{index}",
+                            "title": "Substantiate measurable claims",
+                            "severity": 5 if support_status == "UNSUPPORTED" else 4,
+                            "observation": str(claim.get("claim", "A measurable claim was made without enough detail.")),
+                            "impact": "Specific baselines and validation make your contribution credible to a skeptical interviewer.",
+                            "drill_title": "Metric → Baseline → Result",
+                            "drill_instructions": "Repeat the claim in one sentence, then add the baseline, your action, the result, and how you measured it.",
+                            "evidence_event_ids": [claim_evt_id],
+                            "evidence_start_seconds": start,
+                            "evidence_end_seconds": end,
+                        }
+                    )
+
+            # 6. STAR Gaps
+            star = content.get("star_analysis") or {}
+            missing_components = star.get("missing_components", [])
+            if missing_components:
+                star_evt_id = f"evt-star-{question_number}"
+                star_evt = EvidenceEvent(
+                    id=star_evt_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=EvidenceEventType.STAR_GAP,
+                    start_ms=0,
+                    end_ms=max(0, int(ans_duration * 1000)),
+                    severity=4,
+                    reliability=0.92,
+                    title=f"STAR gap: missing {', '.join(missing_components)}",
+                    explanation=f"The behavioral response did not clearly land the {', '.join(missing_components)} component(s).",
+                    payload={
+                        "missing_components": missing_components,
+                        "question_number": question_number,
+                    },
+                    source=EvidenceSource.AI_EVALUATED,
+                )
+                evidence_events.append(star_evt)
+
+                habits.append(
+                    {
+                        "id": f"habit-star-{question_number}",
+                        "title": "Close the STAR loop",
+                        "severity": 4,
+                        "observation": f"The answer did not clearly land the {', '.join(missing_components)}.",
+                        "impact": "Without a measurable result, the interviewer cannot evaluate the impact of your decisions.",
+                        "drill_title": "Result-first STAR drill",
+                        "drill_instructions": "Answer in four beats: situation, task, action, measurable result. Keep each beat to one sentence.",
+                        "evidence_event_ids": [star_evt_id],
+                        "evidence_start_seconds": 0.0,
+                        "evidence_end_seconds": ans_duration,
+                    }
+                )
+
+            # 7. Ownership Gaps & Weaknesses
+            if content.get("weaknesses"):
+                weakness_text = str(content["weaknesses"][0])
+                own_evt_id = f"evt-ownership-{question_number}"
+                own_evt = EvidenceEvent(
+                    id=own_evt_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    type=EvidenceEventType.OWNERSHIP_GAP,
+                    start_ms=0,
+                    end_ms=max(0, int(ans_duration * 1000)),
+                    severity=3,
+                    reliability=0.88,
+                    title="Make the trade-off explicit",
+                    explanation=weakness_text,
+                    payload={
+                        "weakness": weakness_text,
+                        "question_number": question_number,
+                    },
+                    source=EvidenceSource.AI_EVALUATED,
+                )
+                evidence_events.append(own_evt)
+
+                drill = (content.get("practice_drills") or [{}])[0]
+                habits.append(
+                    {
+                        "id": f"habit-ownership-{question_number}",
+                        "title": "Make the trade-off explicit",
+                        "severity": 3,
+                        "observation": weakness_text,
+                        "impact": "Trade-offs show that your technical decisions were deliberate and production-ready.",
+                        "drill_title": str(drill.get("title", "Trade-off explanation drill")),
+                        "drill_instructions": str(drill.get("instructions", "Name one benefit and one failure mode.")),
+                        "evidence_event_ids": [own_evt_id],
+                        "evidence_start_seconds": 0.0,
+                        "evidence_end_seconds": ans_duration,
                     }
                 )
 
             strengths.extend(strength for strength in content.get("strengths", [])[:2])
 
-            for claim in content.get("claims", []):
-                if claim.get("support_status") not in {"UNSUPPORTED", "PARTIALLY_SUPPORTED"}:
-                    continue
-                habits.append(
-                    {
-                        "id": f"claim-{question_number}",
-                        "title": "Substantiate measurable claims",
-                        "severity": 5 if claim.get("support_status") == "UNSUPPORTED" else 4,
-                        "observation": str(claim.get("claim", "A measurable claim was made without enough detail.")),
-                        "impact": "Specific baselines and validation make your contribution credible to a skeptical interviewer.",
-                        "drill_title": "Metric → Baseline → Result",
-                        "drill_instructions": "Repeat the claim in one sentence, then add the baseline, your action, the result, and how you measured it.",
-                        "evidence_start_seconds": claim.get("start_seconds"),
-                        "evidence_end_seconds": claim.get("start_seconds"),
-                    }
-                )
-
-            star = content.get("star_analysis") or {}
-            missing_components = star.get("missing_components", [])
-            if missing_components:
-                habits.append(
-                    {
-                        "id": f"star-{question_number}",
-                        "title": "Close the STAR loop",
-                        "severity": 4,
-                        "observation": f"The answer did not clearly land the {', '.join(missing_components)}.",
-                        "impact": "Without a result, the interviewer cannot see the outcome of your decisions.",
-                        "drill_title": "Result-first STAR drill",
-                        "drill_instructions": "Answer in four beats: situation, task, action, measurable result. Keep each beat to one sentence.",
-                        "evidence_start_seconds": None,
-                        "evidence_end_seconds": None,
-                    }
-                )
-
-            if content.get("weaknesses"):
-                drill = (content.get("practice_drills") or [{}])[0]
-                habits.append(
-                    {
-                        "id": f"content-{question_number}",
-                        "title": "Make the trade-off explicit",
-                        "severity": 3,
-                        "observation": str(content["weaknesses"][0]),
-                        "impact": "Trade-offs show that your decision was deliberate and production-ready.",
-                        "drill_title": str(drill.get("title", "Trade-off explanation drill")),
-                        "drill_instructions": str(drill.get("instructions", "Name one benefit and one failure mode.")),
-                        "evidence_start_seconds": None,
-                        "evidence_end_seconds": None,
-                    }
-                )
-
-        if total_fillers:
-            first_filler = next(
-                (event for event in evidence_events if event["type"] == "filler"),
-                None,
-            )
+        # 8. Delivery Habits grounded in Measured Events
+        filler_events = [e for e in evidence_events if e.type == EvidenceEventType.FILLER]
+        if filler_events:
             habits.append(
                 {
-                    "id": "delivery-fillers",
+                    "id": "habit-delivery-fillers",
                     "title": "Replace filler clusters with a clean pause",
-                    "severity": min(5, 2 + total_fillers),
-                    "observation": f"Aptly detected {total_fillers} filler word{'s' if total_fillers != 1 else ''} in the recording.",
+                    "severity": min(5, 2 + len(filler_events)),
+                    "observation": f"Aptly detected {len(filler_events)} filler word{'s' if len(filler_events) != 1 else ''} in the recording.",
                     "impact": "A short silent pause sounds more intentional than filling thinking time with 'um' or 'uh'.",
                     "drill_title": "Two-beat pause drill",
                     "drill_instructions": "Answer five prompts. Before each answer, take two silent beats, then begin with your headline.",
-                    "evidence_start_seconds": first_filler["start_seconds"] if first_filler else None,
-                    "evidence_end_seconds": first_filler["end_seconds"] if first_filler else None,
+                    "evidence_event_ids": [e.id for e in filler_events],
+                    "evidence_start_seconds": filler_events[0].start_seconds,
+                    "evidence_end_seconds": filler_events[0].end_seconds,
                 }
             )
 
-        if total_pauses:
+        pause_events = [e for e in evidence_events if e.type == EvidenceEventType.PAUSE]
+        if pause_events:
             habits.append(
                 {
-                    "id": "delivery-pauses",
+                    "id": "habit-delivery-pauses",
                     "title": "Recover faster after a long pause",
                     "severity": 3,
-                    "observation": f"{total_pauses} longer pause{'s' if total_pauses != 1 else ''} appeared between transcript words.",
+                    "observation": f"{len(pause_events)} longer pause{'s' if len(pause_events) != 1 else ''} appeared between transcript words.",
                     "impact": "A visible recovery phrase keeps the interviewer oriented while you think.",
                     "drill_title": "Bridge phrase drill",
                     "drill_instructions": "Practice saying 'I'll break that into two parts' before giving a structured answer.",
-                    "evidence_start_seconds": None,
-                    "evidence_end_seconds": None,
+                    "evidence_event_ids": [e.id for e in pause_events],
+                    "evidence_start_seconds": pause_events[0].start_seconds,
+                    "evidence_end_seconds": pause_events[0].end_seconds,
                 }
             )
 
-        if average_wpm and not 130 <= average_wpm <= 160:
+        pace_events = [e for e in evidence_events if e.type == EvidenceEventType.PACE_SHIFT]
+        if pace_events:
             habits.append(
                 {
-                    "id": "delivery-pace",
+                    "id": "habit-delivery-pace",
                     "title": "Bring your pace into the interview band",
                     "severity": 3,
-                    "observation": f"Average speaking pace was {average_wpm:.0f} WPM; Aptly's coaching band is 130-160 WPM.",
+                    "observation": f"Speaking pace was {average_wpm:.0f} WPM; Aptly's coaching band is 130-160 WPM.",
                     "impact": "A steadier pace gives the interviewer time to follow your reasoning.",
                     "drill_title": "90-second pacing drill",
                     "drill_instructions": "Read a technical explanation aloud for 90 seconds. Mark one breath every sentence and keep the headline first.",
-                    "evidence_start_seconds": None,
-                    "evidence_end_seconds": None,
+                    "evidence_event_ids": [e.id for e in pace_events],
+                    "evidence_start_seconds": pace_events[0].start_seconds,
+                    "evidence_end_seconds": pace_events[0].end_seconds,
                 }
             )
 
+        # De-duplicate habits preserving highest severity
         unique_habits: list[dict[str, Any]] = []
         seen_titles: set[str] = set()
         for habit in sorted(habits, key=lambda value: value["severity"], reverse=True):
@@ -758,6 +916,9 @@ class InterviewService:
         if scored_questions:
             weakest_question_number = min(scored_questions, key=lambda value: value[1])[0]
 
+        # Sorted by timestamp order
+        sorted_events = sorted(evidence_events, key=lambda e: (e.start_ms, e.end_ms))
+
         return {
             "overall_score": overall_score,
             "content_score": round(average_content_score, 1),
@@ -765,10 +926,7 @@ class InterviewService:
             "confidence_label": "Measured + evidence-linked" if questions_review else "Awaiting answers",
             "strengths": list(dict.fromkeys(strengths))[:3],
             "top_habits": top_habits,
-            "evidence_events": sorted(
-                evidence_events,
-                key=lambda event: (event["question_number"] or 0, event["start_seconds"]),
-            ),
+            "evidence_events": [e.model_dump() for e in sorted_events],
             "delivery": {
                 "score": delivery_score,
                 "pace_label": (
@@ -968,6 +1126,7 @@ class InterviewService:
             else 0.0
         )
         report_card = self._build_report_card(
+            session_id=str(interview.id),
             questions_review=questions_review,
             average_content_score=avg_content,
             average_wpm=avg_wpm,

@@ -87,12 +87,16 @@ class GeminiAdaptiveEngine:
 \"\"\"{candidate_transcript}\"\"\"
 
 ### FOLLOW-UP OBJECTIVE
-- Reason: {decision.reason.value}
+- Action: {str(decision.followup_action)}
+- Reason: {str(decision.reason)}
 - Focus: {decision.justification}
+{f'- Missing Evidence: {", ".join(decision.missing_evidence)}' if decision.missing_evidence else ''}
 {f'- Context Anchor Quote: "{decision.context_quote}"' if decision.context_quote else ''}
 
-Generate exactly ONE grounded follow-up question probing this point.
+Generate exactly ONE grounded follow-up question probing this point. Reference the candidate's quote and ask for the missing evidence. Never use generic phrases like 'Tell me more'.
 """
+
+        follow_up_text: str | None = None
 
         try:
             req = LLMGenerateRequest(
@@ -103,19 +107,34 @@ Generate exactly ONE grounded follow-up question probing this point.
             )
             resp = await self.llm_provider.generate_text(req)
             follow_up_text = resp.text.strip().replace('"', '')
+        except Exception as exc:
+            logger.warning("adaptive_followup_llm_failed_falling_back", error=str(exc))
+            # Resilient fallback: Synthesize grounded deterministic follow-up from quote & action
+            if decision.context_quote:
+                action_str = str(decision.followup_action)
+                if action_str == "QUANTIFY":
+                    follow_up_text = f"What was the initial baseline and how did you measure the results when you mentioned '{decision.context_quote}'?"
+                elif action_str == "CLARIFY":
+                    follow_up_text = f"Regarding '{decision.context_quote}', what was your specific individual contribution?"
+                else:
+                    follow_up_text = f"Could you walk through how you validated the outcome for '{decision.context_quote}'?"
 
+        if not follow_up_text:
+            return None
+
+        try:
             # Create and attach follow-up question to Question Graph
             root_id = parent_question.root_question_id or parent_question.id
             followup_q = Question(
                 interview_id=parent_question.interview_id,
-                sequence_number=parent_question.sequence_number,  # same sequence group or sub-step
+                sequence_number=parent_question.sequence_number,
                 category=parent_question.category,
                 question_type="follow_up",
                 competency=decision.target_competency,
                 difficulty=parent_question.difficulty,
                 question_text=follow_up_text,
-                expected_topics=[decision.reason.value],
-                prompt_version="gemini_adaptive_v1",
+                expected_topics=[str(decision.reason)],
+                prompt_version="gemini_adaptive_v2",
                 parent_question_id=parent_question.id,
                 root_question_id=root_id,
                 question_source="follow_up",
@@ -132,9 +151,10 @@ Generate exactly ONE grounded follow-up question probing this point.
                 parent_id=str(parent_question.id),
                 followup_id=str(followup_q.id),
                 question_text=follow_up_text,
+                action=str(decision.followup_action),
                 depth=followup_q.follow_up_depth,
             )
             return followup_q
         except Exception as exc:
-            logger.error("adaptive_followup_generation_failed", error=str(exc))
+            logger.error("adaptive_followup_persistence_failed", error=str(exc))
             return None

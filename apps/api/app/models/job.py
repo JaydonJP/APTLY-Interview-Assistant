@@ -26,6 +26,7 @@ class Job(UUIDMixin, TimestampMixin, Base):
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     # Relationships
     role_profile: Mapped[RoleProfile | None] = relationship(

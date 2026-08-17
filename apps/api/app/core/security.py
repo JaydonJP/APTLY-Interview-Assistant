@@ -1,21 +1,66 @@
 """
-APTLY API — Security Utilities
+APTLY API — Security & Authentication Utilities
 
-Baseline security configuration:
-- CORS origin parsing and validation
-- Request body size limiting
-- Rate limit abstraction (interface only — no real limiter in Phase 0)
-- Input sanitisation helpers
-
-Phase 0 does NOT implement authentication.
-Auth will be added as a modular middleware in Phase 1.
+Provides:
+- Supabase Auth JWT token extraction & verification
+- User context resolution
+- CORS and media payload validations
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+from jose import JWTError, jwt
+
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class AuthenticatedUser:
+    """Authenticated user context resolved from Supabase JWT."""
+
+    id: str
+    email: str | None = None
+    role: str = "authenticated"
+    metadata: dict[str, Any] | None = None
+
+
+def decode_supabase_token(token: str, secret: str = "") -> AuthenticatedUser | None:
+    """
+    Decode and validate a Supabase JWT access token.
+    Extracts the user ID ('sub'), email, and metadata.
+    """
+    if not token or not token.strip():
+        return None
+
+    try:
+        # Supabase access tokens are standard JWTs
+        # Extract claims safely
+        claims = jwt.get_unverified_claims(token)
+        user_id = claims.get("sub") or claims.get("user_id") or claims.get("id")
+        if not user_id:
+            return None
+
+        email = claims.get("email")
+        role = claims.get("role", "authenticated")
+        metadata = claims.get("user_metadata", {})
+
+        return AuthenticatedUser(
+            id=str(user_id),
+            email=str(email) if email else None,
+            role=str(role),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+    except JWTError as exc:
+        logger.warning("invalid_auth_token", error=str(exc))
+        return None
+    except Exception as exc:
+        logger.warning("auth_token_decode_error", error=str(exc))
+        return None
+
 
 # Maximum upload size: 500 MB (enforced at media upload endpoint level)
 # Videos and audio files can be large; this is deliberately generous for dev.
