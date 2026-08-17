@@ -14,19 +14,16 @@ import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
 import { apiClient } from "@/lib/api-client";
 import type { Answer, InterviewDetail, Question } from "@/types/interview";
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
-  CheckCircle2,
   Clock,
   Cpu,
-  Flame,
   Mic,
+  Play,
   Radio,
   RefreshCw,
   Send,
   Sparkles,
-  Square,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -57,6 +54,8 @@ export default function LiveInterviewRoomPage() {
   const [currentAnswer, setCurrentAnswer] = useState<Answer | null>(null);
   const [convState, setConvState] = useState<ConversationalState>("IDLE");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [hasUserStarted, setHasUserStarted] = useState(false);
+
   const spokenQuestionIdsRef = useRef<Set<string>>(new Set());
 
   // Consent Modal State
@@ -88,12 +87,10 @@ export default function LiveInterviewRoomPage() {
     isCameraReady,
     isMicReady,
     isSpeaking,
-    audioTrackState,
-    videoTrackState,
     micLevelPercent,
     recordingDuration,
-    recordedBlob,
     recordedUrl,
+    liveTranscript,
     stream,
     error: mediaError,
     startRecording,
@@ -109,7 +106,7 @@ export default function LiveInterviewRoomPage() {
     },
     onSpeechEnd: () => {
       sendEvent("candidate.stopped", { question_id: currentQuestion?.id });
-      if (!isAutoSubmittingRef.current && !isSubmitting) {
+      if (!isAutoSubmittingRef.current && !isSubmitting && isRecording) {
         void handleAutoFinishAnswer();
       }
     },
@@ -171,12 +168,53 @@ export default function LiveInterviewRoomPage() {
     setIsConsentModalOpen(false);
   };
 
+  // Play Question Voice with SpeechSynthesis
+  const speakQuestionAudio = useCallback(
+    (text: string, persona?: string | null, onComplete?: () => void) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        if (onComplete) onComplete();
+        return;
+      }
+
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        const isHr = String(persona || "").toUpperCase().includes("HR");
+        utterance.pitch = isHr ? 1.12 : 0.94;
+        utterance.rate = 1.05;
+
+        // Try to pick a natural voice if available
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          const preferred = isHr
+            ? voices.find((v) => v.name.includes("Female") || v.name.includes("Samantha") || v.name.includes("Zira") || v.name.includes("Google UK English Female"))
+            : voices.find((v) => v.name.includes("Male") || v.name.includes("David") || v.name.includes("Google US English"));
+          if (preferred) {
+            utterance.voice = preferred;
+          }
+        }
+
+        utterance.onend = () => {
+          if (onComplete) onComplete();
+        };
+
+        utterance.onerror = () => {
+          if (onComplete) onComplete();
+        };
+
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        if (onComplete) onComplete();
+      }
+    },
+    [],
+  );
+
   // Conversational Audio Loop: Speak question, then enter LISTENING mode
   useEffect(() => {
-    if (!hasConsent || !currentQuestion || isLoading || isSubmitting) return;
+    if (!hasConsent || !currentQuestion || isLoading || isSubmitting || !hasUserStarted) return;
     const qId = currentQuestion.id;
 
-    // If already spoken or answer already exists, don't re-trigger speech
     if (spokenQuestionIdsRef.current.has(qId) || currentAnswer) {
       return;
     }
@@ -190,35 +228,82 @@ export default function LiveInterviewRoomPage() {
       void startRecording();
     };
 
-    if (voiceEnabled && typeof window !== "undefined" && "speechSynthesis" in window) {
+    if (voiceEnabled) {
       setConvState("INTERVIEWER_SPEAKING");
-      window.speechSynthesis.cancel();
 
-      const utterance = new SpeechSynthesisUtterance(currentQuestion.question_text);
-      const isHr = String(currentQuestion.interviewer_persona || "").toUpperCase().includes("HR");
-      utterance.pitch = isHr ? 1.12 : 0.94;
-      utterance.rate = 1.05;
+      // Auto-fallback timeout in case browser pauses speech or tab is throttled
+      const maxSpeechWait = Math.min(10000, Math.max(3500, currentQuestion.question_text.length * 60));
+      const fallbackTimer = setTimeout(() => {
+        if (!isCancelled && convState === "INTERVIEWER_SPEAKING") {
+          beginListening();
+        }
+      }, maxSpeechWait);
 
-      utterance.onend = () => {
-        beginListening();
+      speakQuestionAudio(
+        currentQuestion.question_text,
+        currentQuestion.interviewer_persona,
+        () => {
+          clearTimeout(fallbackTimer);
+          beginListening();
+        },
+      );
+
+      return () => {
+        isCancelled = true;
+        clearTimeout(fallbackTimer);
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
       };
-
-      utterance.onerror = () => {
-        beginListening();
-      };
-
-      window.speechSynthesis.speak(utterance);
     } else {
       beginListening();
     }
+  }, [currentQuestion, hasConsent, isLoading, isSubmitting, currentAnswer, voiceEnabled, hasUserStarted, startRecording, speakQuestionAudio, convState]);
 
-    return () => {
-      isCancelled = true;
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, [currentQuestion, hasConsent, isLoading, isSubmitting, currentAnswer, voiceEnabled, startRecording]);
+  // Start Session manually (unlocks browser audio gesture)
+  const handleStartSession = () => {
+    setHasUserStarted(true);
+    if (currentQuestion) {
+      setConvState("INTERVIEWER_SPEAKING");
+      speakQuestionAudio(
+        currentQuestion.question_text,
+        currentQuestion.interviewer_persona,
+        () => {
+          setConvState("LISTENING");
+          void startRecording();
+        },
+      );
+    } else {
+      setConvState("LISTENING");
+      void startRecording();
+    }
+  };
+
+  // Replay Question Audio
+  const handleReplayAudio = () => {
+    if (!currentQuestion) return;
+    setConvState("INTERVIEWER_SPEAKING");
+    speakQuestionAudio(
+      currentQuestion.question_text,
+      currentQuestion.interviewer_persona,
+      () => {
+        setConvState("LISTENING");
+        if (!isRecording) {
+          void startRecording();
+        }
+      },
+    );
+  };
+
+  // Jump straight to answering
+  const handleStartAnsweringNow = () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setHasUserStarted(true);
+    setConvState("LISTENING");
+    void startRecording();
+  };
 
   // Enforce Maximum Answer Duration (180s)
   useEffect(() => {
@@ -262,6 +347,9 @@ export default function LiveInterviewRoomPage() {
         `recording_${currentQuestion.id}.webm`,
       );
       formData.append("duration_seconds", String(recordingDuration || 5.0));
+      if (liveTranscript && liveTranscript.trim().length > 0) {
+        formData.append("transcript_text", liveTranscript.trim());
+      }
 
       setConvState("THINKING");
       sendEvent("interview.thinking", { question_id: currentQuestion.id });
@@ -428,6 +516,31 @@ export default function LiveInterviewRoomPage() {
         </div>
       )}
 
+      {/* ── START PROMPT BANNER (Gestures unlock browser speech synthesis) ── */}
+      {!hasUserStarted && (
+        <div className="mb-6 rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 via-indigo-950/40 to-slate-900/60 p-6 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300">
+              <Volume2 className="h-6 w-6 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Ready for your practice interview?</h3>
+              <p className="text-xs text-slate-300">Click start to hear the interviewer speak the first question aloud and begin.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleStartSession}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-400 transition"
+            >
+              <Play className="h-4 w-4 fill-white" />
+              <span>Start Interview (Hear Question)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── MAIN INTERVIEW CONSOLE ─────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: AI Interviewer Persona & Spoken Question */}
@@ -502,6 +615,39 @@ export default function LiveInterviewRoomPage() {
                   <p className="mt-3 text-xs font-mono text-slate-400">
                     Probing: <span className="text-slate-200">{currentQuestion.target_competency}</span>
                   </p>
+                )}
+              </div>
+
+              {/* Live Transcript Preview */}
+              {liveTranscript && (
+                <div className="mt-4 p-3.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-xs text-slate-300 flex items-start gap-2.5 backdrop-blur-md">
+                  <Mic className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5 animate-pulse" />
+                  <div>
+                    <span className="font-mono text-[11px] text-emerald-400 font-bold tracking-wider uppercase block mb-0.5">Live Spoken Transcript:</span>
+                    <p className="italic text-slate-100 leading-relaxed">&ldquo;{liveTranscript}&rdquo;</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Question Action Controls */}
+              <div className="mt-5 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleReplayAudio}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/40 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-900/60 transition"
+                >
+                  <Volume2 className="h-3.5 w-3.5" />
+                  <span>Hear Question Aloud</span>
+                </button>
+                {convState === "INTERVIEWER_SPEAKING" && (
+                  <button
+                    type="button"
+                    onClick={handleStartAnsweringNow}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 transition"
+                  >
+                    <Mic className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>Skip to Answer</span>
+                  </button>
                 )}
               </div>
             </div>

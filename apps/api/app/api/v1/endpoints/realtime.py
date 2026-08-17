@@ -129,7 +129,6 @@ async def interview_realtime_websocket(
                 llm_provider=llm,
                 transcription_provider=stt,
                 storage_provider=storage,
-                tts_provider=tts,
             )
             interview = await service.get_interview_detail(interview_id)
             if interview:
@@ -186,7 +185,6 @@ async def interview_realtime_websocket(
                             llm_provider=llm,
                             transcription_provider=stt,
                             storage_provider=storage,
-                            tts_provider=tts,
                         )
                         interview = await service.get_interview_detail(interview_id)
                         if interview:

@@ -24,6 +24,7 @@ export interface MediaCaptureState {
   sha256Hash: string;
   stream: MediaStream | null;
   mimeType: string;
+  liveTranscript: string;
   error: string | null;
   startRecording: () => Promise<void>;
   stopRecording: () => Promise<Blob | null>;
@@ -53,6 +54,12 @@ const DEFAULT_CONSTRAINTS: MediaStreamConstraints = {
   },
 };
 
+// Typed helper for browser SpeechRecognition
+interface IWindowWithSpeech extends Window {
+  SpeechRecognition?: any;
+  webkitSpeechRecognition?: any;
+}
+
 export function useMediaCapture({
   enableVideo = true,
   enableAudio = true,
@@ -73,6 +80,7 @@ export function useMediaCapture({
   const [sha256Hash, setSha256Hash] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mimeType, setMimeType] = useState<string>("video/webm");
+  const [liveTranscript, setLiveTranscript] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -85,7 +93,7 @@ export function useMediaCapture({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
-  // VAD Refs
+  // VAD & Speech Recognition Refs
   const isSpeakingRef = useRef<boolean>(false);
   const speechStartTimeRef = useRef<number>(0);
   const silenceStartTimeRef = useRef<number>(0);
@@ -93,6 +101,9 @@ export function useMediaCapture({
   const onSpeechEndRef = useRef(onSpeechEnd);
   onSpeechStartRef.current = onSpeechStart;
   onSpeechEndRef.current = onSpeechEnd;
+
+  const recognitionRef = useRef<any>(null);
+  const transcriptBufferRef = useRef<string>("");
 
   // Detect supported MIME type dynamically
   const getSupportedMimeType = useCallback(() => {
@@ -157,7 +168,7 @@ export function useMediaCapture({
         // VAD Logic when recording is active
         if (enableVAD && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
           const now = Date.now();
-          const isVoiceActive = normalized >= 10;
+          const isVoiceActive = normalized >= 8;
 
           if (isVoiceActive) {
             silenceStartTimeRef.current = 0;
@@ -277,6 +288,11 @@ export function useMediaCapture({
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
     };
   }, [enableVideo, enableAudio]);
 
@@ -284,6 +300,8 @@ export function useMediaCapture({
     setError(null);
     setRecordedBlob(null);
     setSha256Hash("");
+    setLiveTranscript("");
+    transcriptBufferRef.current = "";
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
       setRecordedUrl(null);
@@ -335,6 +353,46 @@ export function useMediaCapture({
       timerRef.current = setInterval(() => {
         setRecordingDuration((Date.now() - startTimeRef.current) / 1000);
       }, 100);
+
+      // Start Browser Speech Recognition for Live Accurate Transcripts
+      if (typeof window !== "undefined") {
+        const win = window as IWindowWithSpeech;
+        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        if (SpeechRec) {
+          try {
+            const recognition = new SpeechRec();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = "en-US";
+
+            recognition.onresult = (event: any) => {
+              let fullText = "";
+              for (let i = 0; i < event.results.length; i++) {
+                fullText += event.results[i][0].transcript + " ";
+              }
+              const clean = fullText.trim();
+              transcriptBufferRef.current = clean;
+              setLiveTranscript(clean);
+            };
+
+            recognition.onerror = () => {
+              // Ignore background speech recognition errors
+            };
+
+            recognition.onend = () => {
+              // Auto-restart if still recording
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+                try {
+                  recognition.start();
+                } catch {}
+              }
+            };
+
+            recognition.start();
+            recognitionRef.current = recognition;
+          } catch {}
+        }
+      }
     } catch (err: unknown) {
       setError(
         err instanceof Error ? err.message : "Failed to start MediaRecorder recording.",
@@ -344,6 +402,14 @@ export function useMediaCapture({
 
   const stopRecording = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
+      // Stop speech recognition
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
         setIsRecording(false);
@@ -389,6 +455,12 @@ export function useMediaCapture({
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
     }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
     chunksRef.current = [];
     isSpeakingRef.current = false;
     silenceStartTimeRef.current = 0;
@@ -399,6 +471,8 @@ export function useMediaCapture({
     setRecordedUrl(null);
     setRecordingDuration(0);
     setSha256Hash("");
+    setLiveTranscript("");
+    transcriptBufferRef.current = "";
   }, [recordedUrl]);
 
   return {
@@ -415,6 +489,7 @@ export function useMediaCapture({
     sha256Hash,
     stream,
     mimeType,
+    liveTranscript,
     error,
     startRecording,
     stopRecording,

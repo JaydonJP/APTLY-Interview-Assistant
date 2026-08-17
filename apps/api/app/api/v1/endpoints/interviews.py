@@ -170,6 +170,9 @@ async def upload_answer_audio(
     duration_seconds: Annotated[
         float, Form(description="Total recorded duration in seconds")
     ] = 0.0,
+    transcript_text: Annotated[
+        str | None, Form(description="Optional live candidate speech transcript")
+    ] = None,
     service: InterviewService = Depends(_get_interview_service),
 ) -> AnswerResponse:
     """Upload recorded audio and process transcript/metrics."""
@@ -215,6 +218,7 @@ async def upload_answer_audio(
         audio_data=audio_data,
         content_type=content_type,
         duration_seconds=duration_seconds,
+        transcript_text=transcript_text,
     )
     return _to_answer_response(answer)
 
