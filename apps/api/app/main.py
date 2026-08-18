@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -74,59 +73,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             ),
         )
 
-    # Initialize database tables on startup for local development. PostgreSQL
-    # may take a few seconds to become ready after Docker starts, so retry the
-    # connection instead of racing the container and masking the failure with
-    # an unrelated SQLite database.
+    # Verify the Supabase PostgreSQL connection before accepting requests.
+    # PostgreSQL may take a few seconds to become ready, so retry the
+    # connection while preserving the real failure instead of substituting a
+    # local database.
+    from sqlalchemy import text
+
     from app.dependencies import get_async_engine
-    from app.models.base import Base
-    async def _init_db() -> None:
-        database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+
+    async def _check_database(database_url: str) -> None:
         engine = get_async_engine(database_url)
-        attempts = 5 if database_url.startswith("postgresql") else 1
+        attempts = 5
         last_error: Exception | None = None
-
-        def _sync_sqlite_schema(sync_conn: Any) -> None:
-            Base.metadata.create_all(sync_conn)
-            # Automatic column migration for sqlite
-            try:
-                cursor = sync_conn.connection.cursor()
-                # Check questions table columns
-                cols = [r[1] for r in cursor.execute("PRAGMA table_info(questions)").fetchall()]
-                if cols and "interviewer_persona" not in cols:
-                    cursor.execute("ALTER TABLE questions ADD COLUMN interviewer_persona VARCHAR(50)")
-                if cols and "normalized_storage_key" not in cols:
-                    cursor.execute("ALTER TABLE answers ADD COLUMN normalized_storage_key VARCHAR(255)")
-                answer_cols = [r[1] for r in cursor.execute("PRAGMA table_info(answers)").fetchall()]
-                answer_additions = {
-                    "video_storage_key": "VARCHAR(500)",
-                    "video_size_bytes": "INTEGER",
-                    "video_checksum_sha256": "VARCHAR(64)",
-                    "media_content_type": "VARCHAR(100)",
-                    "media_has_video": "BOOLEAN NOT NULL DEFAULT 0",
-                }
-                for column, column_type in answer_additions.items():
-                    if answer_cols and column not in answer_cols:
-                        cursor.execute(f"ALTER TABLE answers ADD COLUMN {column} {column_type}")
-
-                transcript_cols = [r[1] for r in cursor.execute("PRAGMA table_info(transcripts)").fetchall()]
-                transcript_additions = {
-                    "quality_score": "FLOAT NOT NULL DEFAULT 0",
-                    "provider_confidence": "FLOAT NOT NULL DEFAULT 0",
-                    "source_agreement_score": "FLOAT",
-                    "quality_label": "VARCHAR(20) NOT NULL DEFAULT 'low'",
-                    "quality_notes": "TEXT NOT NULL DEFAULT ''",
-                }
-                for column, column_type in transcript_additions.items():
-                    if transcript_cols and column not in transcript_cols:
-                        cursor.execute(f"ALTER TABLE transcripts ADD COLUMN {column} {column_type}")
-            except Exception as e:
-                logger.warning("sqlite_column_sync_warning", error=str(e))
 
         for attempt in range(1, attempts + 1):
             try:
-                async with engine.begin() as conn:
-                    await conn.run_sync(_sync_sqlite_schema)
+                async with engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
                 return
             except Exception as exc:
                 last_error = exc
@@ -145,16 +108,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if last_error:
             raise last_error
 
+    database_url = ""
+    database_driver = "unconfigured"
     try:
-        await asyncio.wait_for(_init_db(), timeout=45.0)
+        database_url = settings.required_database_url()
+        database_driver = database_url.split(":", 1)[0]
+        await asyncio.wait_for(_check_database(database_url), timeout=45.0)
         logger.info(
-            "database_schema_ready",
-            database_driver=settings.database_url.split(":", 1)[0],
+            "database_connection_ready",
+            database_driver=database_driver,
         )
     except Exception as exc:
         logger.error(
             "database_init_failed",
-            database_driver=settings.database_url.split(":", 1)[0],
+            database_driver=database_driver,
             error=str(exc)[:300],
         )
         raise RuntimeError(

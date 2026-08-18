@@ -107,7 +107,7 @@ async def interview_realtime_websocket(
     await manager.connect(interview_id, websocket)
 
     settings = get_settings()
-    database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+    database_url = settings.required_database_url()
     session_factory = get_session_factory(database_url)
 
     llm = _get_llm_provider_instance(settings.llm_provider, settings.llm_api_key)
@@ -115,8 +115,8 @@ async def interview_realtime_websocket(
     storage = _get_storage_provider_instance(
         settings.storage_provider,
         settings.storage_endpoint,
-        settings.storage_access_key,
-        settings.storage_secret_key,
+        settings.supabase_url,
+        settings.supabase_service_role_key,
         settings.storage_bucket,
     )
 

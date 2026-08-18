@@ -90,10 +90,7 @@ async def get_db(
     The session is automatically committed on success
     and rolled back on exception.
     """
-    # Keep configuration validation explicit while allowing the API to boot in
-    # a no-database development shell. Feature-gated endpoints can still return
-    # their safe fallback without attempting a database query.
-    database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+    database_url = settings.required_database_url()
     session_factory = get_session_factory(database_url)
     async with session_factory() as session:
         try:
@@ -121,8 +118,11 @@ def _get_storage_provider_instance(
         return LocalStorageProvider(root_dir=endpoint)
     if provider == "supabase":
         if not supabase_url or not supabase_service_role_key:
-            logger.warning("storage_provider_fallback", reason="Supabase credentials missing, falling back to local storage", endpoint=endpoint)
-            return LocalStorageProvider(root_dir=endpoint)
+            raise RuntimeError(
+                "Supabase Storage is configured but SUPABASE_URL or "
+                "SUPABASE_SERVICE_ROLE_KEY is missing. Refusing to fall back "
+                "to local storage."
+            )
         from app.services.storage.supabase import SupabaseStorageProvider
 
         logger.info("storage_provider_init", provider="supabase", bucket=bucket_name)

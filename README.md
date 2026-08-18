@@ -948,8 +948,13 @@ same Supabase PostgreSQL database with Alembic before starting the API.
 cd C:\OblivionX\Projects\Hackathon\APTLY\apps\api
 python -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
+.venv\Scripts\alembic upgrade head
 .venv\Scripts\uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ~~~
+
+Do not start the Docker PostgreSQL service for this setup. The migration and
+API process use the Supabase URL from `apps/api/.env`; startup fails if that
+URL is missing, local, or not a Supabase PostgreSQL connection string.
 
 The API should be available at:
 
@@ -1113,7 +1118,7 @@ The default runtime is remote-only. Check that `DATABASE_URL` contains the Supab
 ~~~powershell
 cd C:\OblivionX\Projects\Hackathon\APTLY\apps\api
 .\.venv\Scripts\alembic upgrade head
-.\.venv\Scripts\python.exe -c "from app.config import get_settings; s=get_settings(); print(s.database_url.split('@')[-1])"
+.\.venv\Scripts\python.exe -c "from app.config import get_settings; from urllib.parse import urlsplit; print(urlsplit(get_settings().required_database_url()).hostname)"
 ~~~
 
 The API fails fast if `DATABASE_URL` is empty or unreachable; it never swaps in SQLite.

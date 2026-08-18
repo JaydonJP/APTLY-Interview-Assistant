@@ -30,6 +30,37 @@ def test_database_connection_is_explicit() -> None:
 
 
 @pytest.mark.unit
+def test_required_database_url_rejects_missing_database() -> None:
+    """A real API process must not start without Supabase PostgreSQL."""
+    settings = Settings(_env_file=None, secret_key="test-secret")  # type: ignore[call-arg]
+    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+        settings.required_database_url()
+
+
+@pytest.mark.unit
+def test_required_database_url_rejects_local_database() -> None:
+    """Local PostgreSQL is not an allowed runtime database."""
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        secret_key="test-secret",
+        database_url="postgresql+asyncpg://user:pass@localhost:5432/aptly",
+    )
+    with pytest.raises(RuntimeError, match="Local databases are disabled"):
+        settings.required_database_url()
+
+
+@pytest.mark.unit
+def test_required_database_url_accepts_supabase_pooler() -> None:
+    """Supabase Transaction Pooler URLs are accepted after normalization."""
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        secret_key="test-secret",
+        database_url="postgresql://user:pass@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
+    )
+    assert settings.required_database_url().startswith("postgresql+asyncpg://")
+
+
+@pytest.mark.unit
 def test_settings_mock_providers_default() -> None:
     """All AI providers default to mock in base configuration."""
     settings = Settings(

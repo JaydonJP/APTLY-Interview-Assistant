@@ -8,19 +8,30 @@ Validates:
 - Fallback behavior when feature flag is disabled
 """
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.dependencies import get_db, get_storage
 from app.main import app
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # These tests exercise the token response contract, not database access.
+    # The production runtime still requires Supabase PostgreSQL; this override
+    # keeps the direct TestClient fixture isolated from those external services.
+    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_storage] = lambda: None
+    test_client = TestClient(app)
+    try:
+        yield test_client
+    finally:
+        test_client.close()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_storage, None)
 
 
 def test_gemini_live_configuration_defaults():

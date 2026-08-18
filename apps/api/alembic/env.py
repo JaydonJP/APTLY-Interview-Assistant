@@ -34,9 +34,10 @@ from app.models.base import Base
 # ── Alembic Config Object ─────────────────────────────────────────────────────
 config = context.config
 settings = get_settings()
+database_url = settings.required_database_url()
 
 # Override sqlalchemy.url with our typed settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
@@ -86,7 +87,7 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations with an async engine."""
     configuration = config.get_section(config.config_ini_section) or {}
-    configuration["sqlalchemy.url"] = settings.database_url
+    configuration["sqlalchemy.url"] = database_url
 
     connectable = async_engine_from_config(
         configuration,

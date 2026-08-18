@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,7 +23,8 @@ class Settings(BaseSettings):
     """
     Typed application configuration loaded from environment variables.
 
-    All fields have safe defaults for local development.
+    AI providers may use safe mock defaults for local development, but the
+    application database is always a Supabase PostgreSQL service.
     Never put real secrets here — use .env or secrets management.
     """
 
@@ -59,14 +61,14 @@ class Settings(BaseSettings):
     # ── Database ───────────────────────────────────────────────
     database_url: str = Field(
         default="",
-        description="Explicit async database URL; local development may use SQLite",
+        description="Supabase PostgreSQL async database URL",
     )
 
     # ── Redis ──────────────────────────────────────────────────
     redis_url: str = Field(default="redis://localhost:6379/0")
 
     # ── Storage ────────────────────────────────────────────────
-    storage_provider: Literal["local", "s3", "supabase", "r2"] = "local"
+    storage_provider: Literal["local", "s3", "supabase", "r2"] = "supabase"
     storage_bucket: str = "aptly-media"
     storage_endpoint: str = "./storage"
     storage_access_key: str = ""
@@ -178,6 +180,41 @@ class Settings(BaseSettings):
             and self.tts_provider == "mock"
             and self.transcription_provider == "mock"
         )
+
+    def required_database_url(self) -> str:
+        """Return the configured Supabase URL or fail with an actionable error.
+
+        SQLite and local PostgreSQL are intentionally not valid runtime
+        databases. Tests can still inject their own database dependency, but
+        every real API process must use the hosted Supabase PostgreSQL service.
+        """
+        database_url = self.database_url.strip()
+        if not database_url:
+            raise RuntimeError(
+                "DATABASE_URL is required. Set it to the Supabase PostgreSQL "
+                "connection string before starting APTLY."
+            )
+
+        if not database_url.startswith("postgresql+asyncpg://"):
+            raise RuntimeError(
+                "DATABASE_URL must be a Supabase PostgreSQL URL using the "
+                "postgresql+asyncpg:// scheme."
+            )
+
+        hostname = urlsplit(database_url).hostname
+        if not hostname or hostname in {"localhost", "127.0.0.1", "::1"}:
+            raise RuntimeError(
+                "Local databases are disabled for the APTLY runtime. Set "
+                "DATABASE_URL to the Supabase direct or Transaction Pooler URL."
+            )
+
+        if not (hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com")):
+            raise RuntimeError(
+                "DATABASE_URL must point to Supabase PostgreSQL. Use the direct "
+                "or Transaction Pooler connection string from Supabase."
+            )
+
+        return database_url
 
     @field_validator("database_url", mode="before")
     @classmethod
