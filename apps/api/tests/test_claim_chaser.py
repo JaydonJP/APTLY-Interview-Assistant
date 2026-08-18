@@ -13,8 +13,9 @@ Tests cover:
 - Fail-safe resilience when LLM provider raises exceptions
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
 import pytest
 
 from app.models.question import Question
@@ -32,7 +33,6 @@ from app.services.adaptive_interview.followup_decision import (
     FollowUpReason,
 )
 from app.services.providers.mock_llm import MockLLMProvider
-
 
 # ── 1. Specific Target Test Cases ─────────────────────────────────────────────
 

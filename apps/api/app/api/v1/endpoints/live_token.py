@@ -8,7 +8,6 @@ Ensures GEMINI_API_KEY is never exposed to the client browser.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status

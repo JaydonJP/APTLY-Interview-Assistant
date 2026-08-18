@@ -8,7 +8,6 @@ Validates:
 - Fallback behavior when feature flag is disabled
 """
 
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest

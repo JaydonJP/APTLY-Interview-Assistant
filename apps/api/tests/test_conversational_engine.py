@@ -5,15 +5,14 @@ Tests the live conversational loop, ClaimChaser adaptive probing, Stop Probing R
 cross-turn session memory retrieval, and structured conversational moves.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from app.models.question import Question
+import pytest
+
 from app.models.content_metrics import ContentMetrics
-from app.schemas.claim_chaser import ClaimSupportStatus, ClaimType, FollowUpAction
+from app.models.question import Question
 from app.services.adaptive_interview.engine import GeminiAdaptiveEngine
-from app.services.adaptive_interview.claim_chaser import ClaimChaserService
 from app.services.providers.mock_llm import MockLLMProvider
 
 

@@ -11,6 +11,7 @@ import { RecordingConsentModal } from "@/components/interview/RecordingConsentMo
 import { PanelInterviewerDeck } from "@/components/panel/PanelInterviewerDeck";
 import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
+import { useFaceBehaviorTracking } from "@/hooks/useFaceBehaviorTracking";
 import { apiClient } from "@/lib/api-client";
 import type { Answer, InterviewDetail, Question } from "@/types/interview";
 import {
@@ -242,6 +243,14 @@ export default function LiveInterviewRoomPage() {
     },
   });
 
+  // Client-Side Privacy-Aware Observable Computer Vision Tracker (~12 FPS)
+  const behaviorTracker = useFaceBehaviorTracking({
+    stream,
+    enabled: Boolean(hasConsent && stream && isCameraReady),
+    questionId: currentQuestion?.id,
+    answerId: currentAnswer?.id,
+  });
+
   // Fetch or initialize interview session
   const fetchInterview = useCallback(async () => {
     try {
@@ -408,7 +417,7 @@ export default function LiveInterviewRoomPage() {
   }, [isRecording, recordingDuration]);
 
   // Auto-finish and submit turn
-  const handleAutoFinishAnswer = async () => {
+  async function handleAutoFinishAnswer() {
     if (isAutoSubmittingRef.current || isSubmitting || !currentQuestion) return;
     isAutoSubmittingRef.current = true;
     setIsSubmitting(true);
@@ -455,6 +464,19 @@ export default function LiveInterviewRoomPage() {
         formData,
       );
       setCurrentAnswer(processedAns);
+
+      // Submit client-side recorded computer vision behavior events
+      const recordedEvents = behaviorTracker.getRecordedEventsAndReset();
+      if (recordedEvents.length > 0) {
+        void apiClient
+          .post(`/api/v1/interviews/${interviewId}/behavior`, {
+            events: recordedEvents,
+            question_id: currentQuestion.id,
+            answer_id: answerId,
+            duration_seconds: recordingDuration || 5.0,
+          })
+          .catch((err) => console.warn("Behavior events submission notice:", err));
+      }
 
       // Step 3: Advance to next question / follow-up
       const updated = await apiClient.post<InterviewDetail>(
@@ -780,6 +802,10 @@ export default function LiveInterviewRoomPage() {
               isMicReady={isMicReady}
               isRecording={isRecording}
               recordedUrl={recordedUrl}
+              faceDetected={behaviorTracker.faceDetected}
+              calibrationProgress={behaviorTracker.calibrationProgress}
+              calibrationState={behaviorTracker.calibrationState}
+              framingState={behaviorTracker.framingState}
             />
 
             {/* Speaking Indicator Badge */}

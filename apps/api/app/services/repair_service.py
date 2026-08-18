@@ -10,9 +10,7 @@ Never claims improvement unless BOTH attempts have real, empirical measurements.
 
 from __future__ import annotations
 
-import re
 from typing import Any
-from uuid import UUID
 
 from app.core.logging import get_logger
 from app.models.content_metrics import ContentMetrics

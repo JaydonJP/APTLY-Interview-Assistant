@@ -8,15 +8,16 @@ Tests cover:
 - Recurring evidence debt aggregation
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
 import pytest
 
 from app.models.answer import Answer
 from app.models.content_metrics import ContentMetrics
 from app.models.interview import Interview
-from app.models.job import Job, RoleProfile
+from app.models.job import RoleProfile
 from app.models.metrics import SpeechMetrics
 from app.models.question import Question
 from app.models.transcript import Transcript
@@ -24,7 +25,6 @@ from app.schemas.interview_twin import InterviewTwinProfile
 from app.services.interview_twin_service import InterviewTwinService
 from app.services.providers.mock_llm import MockLLMProvider
 from app.services.question_generator import QuestionGeneratorService
-
 
 # ── 1. Insufficient Data Guard ────────────────────────────────────────────────
 
@@ -54,8 +54,8 @@ async def test_twin_insufficient_data_with_zero_or_one_session():
         difficulty_level="medium",
         target_duration_minutes=30,
         current_question_index=1,
-        created_at=datetime.now(timezone.utc),
-        completed_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
     )
     interview_1.questions = []
     interview_1.answers = []
@@ -90,8 +90,8 @@ async def test_twin_aggregates_multiple_real_sessions():
             difficulty_level="medium",
             target_duration_minutes=30,
             current_question_index=1,
-            created_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC),
         )
 
         q = Question(

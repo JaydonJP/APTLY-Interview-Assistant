@@ -12,6 +12,7 @@ Tests cover:
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
 import pytest
 
 from app.models.content_metrics import ContentMetrics
@@ -21,7 +22,6 @@ from app.schemas.memory import MemoryType
 from app.services.adaptive_interview.engine import GeminiAdaptiveEngine
 from app.services.providers.mock_llm import MockLLMProvider
 from app.services.session_memory.service import SessionMemoryService
-
 
 # ── 1. Technology Persistence ─────────────────────────────────────────────────
 

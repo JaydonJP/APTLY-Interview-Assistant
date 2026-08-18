@@ -19,7 +19,6 @@ from app.schemas.claim_chaser import (
     FollowUpAction,
 )
 from app.services.providers.base import (
-    LLMGenerateRequest,
     LLMProvider,
     LLMStructuredRequest,
 )

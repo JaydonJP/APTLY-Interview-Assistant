@@ -644,7 +644,11 @@ class InterviewService:
         structured content evaluator (AI_EVALUATED). Every report insight is strictly traceable
         to one or more evidence events.
         """
-        from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+        from app.schemas.evidence import (
+            EvidenceEvent,
+            EvidenceEventType,
+            EvidenceSource,
+        )
 
         evidence_events: list[EvidenceEvent] = []
         habits: list[dict[str, Any]] = []
@@ -1216,7 +1220,9 @@ class InterviewService:
                     }
 
             # Extract Answer DNA (Technical or Behavioral)
-            from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+            from app.services.content_intelligence.answer_dna_service import (
+                AnswerDNAService,
+            )
 
             dna_service = AnswerDNAService()
             transcript_text = (item.get("transcript") or {}).get("full_text") or ""
@@ -1269,7 +1275,9 @@ class InterviewService:
 
         target_competencies = list(dict.fromkeys(target_competencies))
 
-        from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+        from app.services.content_intelligence.answer_dna_service import (
+            AnswerDNAService,
+        )
         dna_service = AnswerDNAService()
         competency_coverage = dna_service.evaluate_session_competencies(
             interview_id=str(interview.id),

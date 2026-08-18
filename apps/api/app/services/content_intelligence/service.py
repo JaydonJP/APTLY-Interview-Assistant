@@ -11,7 +11,6 @@ Orchestrates semantic evaluation of candidate answers:
 
 from __future__ import annotations
 
-import asyncio
 from uuid import UUID
 
 from sqlalchemy import select

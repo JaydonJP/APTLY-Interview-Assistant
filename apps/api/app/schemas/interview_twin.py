@@ -12,9 +12,6 @@ Defines the longitudinal coaching history model (NOT personality profiling):
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import UUID
-
 from pydantic import Field
 
 from app.schemas.common import AptlyBaseModel

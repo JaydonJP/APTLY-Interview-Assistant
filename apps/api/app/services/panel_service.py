@@ -10,7 +10,6 @@ Orchestrates multi-perspective panel interviews:
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from app.core.logging import get_logger
 from app.schemas.panel import (

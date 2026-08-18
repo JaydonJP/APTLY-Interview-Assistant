@@ -88,7 +88,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             Base.metadata.create_all(sync_conn)
             # Automatic column migration for sqlite
             try:
-                from sqlalchemy import text
                 cursor = sync_conn.connection.cursor()
                 # Check questions table columns
                 cols = [r[1] for r in cursor.execute("PRAGMA table_info(questions)").fetchall()]

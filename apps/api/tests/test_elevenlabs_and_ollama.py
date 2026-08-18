@@ -11,9 +11,11 @@ Validates:
 import pytest
 
 from app.services.providers.base import LLMStructuredRequest, TTSSynthesisRequest
-from app.services.providers.elevenlabs_tts import ElevenLabsTTSProvider, clean_text_for_speech
+from app.services.providers.elevenlabs_tts import (
+    ElevenLabsTTSProvider,
+    clean_text_for_speech,
+)
 from app.services.providers.mock_llm import MockLLMProvider
-from app.services.providers.mock_tts import MockTTSProvider
 from app.services.providers.ollama_llm import OllamaLLMProvider
 
 

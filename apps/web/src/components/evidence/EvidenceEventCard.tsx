@@ -107,7 +107,7 @@ export function EvidenceEventCard({
       {quote && (
         <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-white/6 bg-black/25 px-3 py-2 text-xs text-slate-300">
           <Quote className="h-3 w-3 shrink-0 text-slate-500 mt-0.5" />
-          <span className="italic line-clamp-2">"{quote}"</span>
+          <span className="italic line-clamp-2">&quot;{quote}&quot;</span>
         </div>
       )}
     </div>

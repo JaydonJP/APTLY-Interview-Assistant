@@ -13,16 +13,16 @@ Tests failure injection for:
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from app.models.answer import Answer
-from app.models.job import Job, RoleProfile
-from app.models.question import Question
-from app.services.content_intelligence.service import ContentAnalysisInput, ContentAnalysisService
+import pytest
+
+from app.models.job import RoleProfile
+from app.services.content_intelligence.service import (
+    ContentAnalysisInput,
+    ContentAnalysisService,
+)
 from app.services.interview_service import InterviewService
-from app.services.media_normalizer import MediaNormalizerService
 from app.services.providers.base import (
     LLMGenerateRequest,
     LLMProvider,

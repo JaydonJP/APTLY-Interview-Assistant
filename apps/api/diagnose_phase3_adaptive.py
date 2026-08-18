@@ -110,7 +110,7 @@ async def run_phase3_diagnostics() -> None:
         "You mentioned improving performance by 40 percent. "
         "How did you measure that baseline and verify the improvement?"
     )
-    print(f"\n>> 4. Generated Grounded Follow-up Question:")
+    print("\n>> 4. Generated Grounded Follow-up Question:")
     print(f"  * Question: \"{followup_text}\"")
     print(f"  * Question Graph Depth: {parent_q.follow_up_depth + 1} (Parent ID: {parent_q.id})")
 

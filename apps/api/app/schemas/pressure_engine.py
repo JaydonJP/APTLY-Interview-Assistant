@@ -8,7 +8,6 @@ Defines the 6 Pressure Levels and 8 Interview Actions for adaptive difficulty mo
 from __future__ import annotations
 
 from enum import IntEnum, StrEnum
-from typing import Any
 
 from pydantic import Field
 

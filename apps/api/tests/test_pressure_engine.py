@@ -12,6 +12,7 @@ Tests cover:
 
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
+
 import pytest
 
 from app.models.content_metrics import ContentMetrics
@@ -27,7 +28,6 @@ from app.services.adaptive_interview.pressure_engine import (
     PressureEngineService,
 )
 from app.services.providers.mock_llm import MockLLMProvider
-
 
 # ── 1. Levels and Actions Catalog Validation ─────────────────────────────────
 

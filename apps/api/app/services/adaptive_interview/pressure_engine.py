@@ -9,8 +9,6 @@ Dynamically adjusts question pressure (Levels 1 to 6) based on candidate perform
 
 from __future__ import annotations
 
-from typing import Any
-
 from app.core.logging import get_logger
 from app.models.content_metrics import ContentMetrics
 from app.models.metrics import SpeechMetrics

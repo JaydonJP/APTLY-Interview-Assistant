@@ -21,12 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.models.content_metrics import ContentMetrics
 from app.models.question import Question
-from app.schemas.claim_chaser import ClaimSupportStatus, ClaimType, FollowUpAction
 from app.schemas.pressure_engine import PressureAction, PressureLevel
 from app.services.adaptive_interview.followup_decision import (
-    FollowUpDecision,
     FollowUpDecisionService,
-    FollowUpReason,
 )
 from app.services.adaptive_interview.pressure_engine import PressureEngineService
 from app.services.providers.base import LLMGenerateRequest, LLMProvider
@@ -205,8 +202,8 @@ class GeminiAdaptiveEngine:
 {memory_context}
 
 ### CLAIMCHASER INTENT
-- Action: {str(decision.followup_action)}
-- Reason: {str(decision.reason)}
+- Action: {decision.followup_action!s}
+- Reason: {decision.reason!s}
 - Justification: {decision.justification}
 {f'- Missing Evidence: {", ".join(decision.missing_evidence)}' if decision.missing_evidence else ''}
 {f'- Context Anchor Quote: "{decision.context_quote}"' if decision.context_quote else ''}

@@ -10,7 +10,6 @@ Tests cover:
 """
 
 from uuid import uuid4
-import pytest
 
 from app.models.content_metrics import ContentMetrics
 from app.models.metrics import SpeechMetrics
@@ -19,7 +18,6 @@ from app.schemas.repair import (
     RepairMetricsSnapshot,
 )
 from app.services.repair_service import DRILL_CATALOG, RepairService
-
 
 # ── 1. All 9 Specialized Drills Catalog Validation ───────────────────────────
 

@@ -31,6 +31,8 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { RepairModeModal } from "@/components/repair/RepairModeModal";
 import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
 import { DualPerspectivePanelCard } from "@/components/panel/DualPerspectivePanelCard";
+import { VisualDeliveryCard } from "@/components/behavior/VisualDeliveryCard";
+import type { VisualDeliverySummary } from "@/types/behavior";
 import type {
   ContentMetrics,
   EvidenceEvent,
@@ -56,6 +58,7 @@ export default function InterviewReviewPage() {
   const params = useParams<{ id: string }>();
   const interviewId = params.id;
   const [review, setReview] = useState<InterviewReview | null>(null);
+  const [behaviorSummary, setBehaviorSummary] = useState<VisualDeliverySummary | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [pendingSeek, setPendingSeek] = useState<number | null>(null);
@@ -69,8 +72,17 @@ export default function InterviewReviewPage() {
     let cancelled = false;
     async function loadReview() {
       try {
-        const data = await apiClient.get<InterviewReview>(`/api/v1/interviews/${interviewId}/review`);
-        if (!cancelled) setReview(data);
+        const [reviewData, behaviorData] = await Promise.allSettled([
+          apiClient.get<InterviewReview>(`/api/v1/interviews/${interviewId}/review`),
+          apiClient.get<VisualDeliverySummary>(`/api/v1/interviews/${interviewId}/behavior`),
+        ]);
+
+        if (!cancelled && reviewData.status === "fulfilled") {
+          setReview(reviewData.value);
+        }
+        if (!cancelled && behaviorData.status === "fulfilled") {
+          setBehaviorSummary(behaviorData.value);
+        }
       } catch (err: unknown) {
         if (!cancelled) setError(err instanceof Error ? err.message : "The report could not be loaded.");
       } finally {
@@ -576,6 +588,9 @@ export default function InterviewReviewPage() {
           technicalDna={currentItem?.technical_dna}
           behavioralDna={currentItem?.behavioral_dna}
         />
+
+        {/* ── OBSERVABLE VISUAL DELIVERY & ON-CAMERA PRESENCE CARD ── */}
+        <VisualDeliveryCard summary={behaviorSummary} onSeekVideo={seekTo} />
 
         {/* 7-Stage Repair Mode Modal */}
         <RepairModeModal

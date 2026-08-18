@@ -12,6 +12,7 @@ Executes and verifies:
 from __future__ import annotations
 
 import asyncio
+
 from app.schemas.content_intelligence import ContentAnalysisInput
 from app.services.content_intelligence.service import ContentAnalysisService
 from app.services.providers.mock_llm import MockLLMProvider
@@ -101,14 +102,14 @@ async def run_diagnostics() -> None:
                 print(f"    - [{c.support_status}] \"{c.claim}\"")
 
         if res.feedback:
-            print(f"  * Actionable Feedback:")
+            print("  * Actionable Feedback:")
             for f in res.feedback:
                 print(f"    - Observation: {f.observation}")
                 print(f"    - Impact: {f.impact}")
                 print(f"    - Action: {f.action}")
 
         if res.practice_drills:
-            print(f"  * Practice Drill:")
+            print("  * Practice Drill:")
             for d in res.practice_drills:
                 print(f"    - {d.title} ({d.duration_seconds}s, {d.repeat_count}x reps): {d.instructions}")
 

@@ -4,12 +4,8 @@ Tests for APTLY Panel Mode Service, Personas, and Dual-Perspective Evaluation.
 
 from __future__ import annotations
 
-import pytest
-from uuid import uuid4
-
 from app.schemas.panel import (
     InterviewerPersona,
-    PERSONA_REGISTRY,
     get_all_personas,
     get_persona_profile,
 )

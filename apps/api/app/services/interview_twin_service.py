@@ -11,9 +11,6 @@ Aggregates real candidate session histories into a longitudinal coaching model:
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
-from typing import Any
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +19,6 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.interview import Interview
 from app.schemas.interview_twin import (
-    CompletedDrillRecord,
     EvidenceDebtItem,
     InterviewTwinProfile,
     SessionTrendPoint,

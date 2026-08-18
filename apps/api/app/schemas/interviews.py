@@ -208,7 +208,7 @@ from app.schemas.answer_dna import (
     SessionCompetencyCoverage,
     TechnicalAnswerDNA,
 )
-from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+from app.schemas.evidence import EvidenceEvent
 
 
 class QuestionReviewItem(AptlyBaseModel):

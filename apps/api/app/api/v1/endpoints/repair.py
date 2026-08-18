@@ -17,12 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.dependencies import get_db
 from app.models.answer import Answer
-from app.models.content_metrics import ContentMetrics
-from app.models.interview import Interview
-from app.models.metrics import SpeechMetrics
-from app.models.question import Question
 from app.schemas.repair import (
-    RepairDrillType,
     RepairMetricsSnapshot,
     RepairSessionEvaluation,
     RepairSubmitRequest,
@@ -61,7 +56,7 @@ async def submit_repair_attempt(
             selectinload(Answer.speech_metrics),
             selectinload(Answer.question),
         )
-        .order_by(Answer.attempt_number.asc())
+        .order_by(Answer.sequence_number.asc())
     )
     res = await db.execute(stmt)
     original_answer = res.scalars().first()

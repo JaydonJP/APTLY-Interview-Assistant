@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import httpx
 

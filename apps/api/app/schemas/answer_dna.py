@@ -7,7 +7,6 @@ Defines the 7-dimension Technical DNA, 6-dimension Behavioral DNA, and JD Compet
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
 
 from pydantic import Field
 

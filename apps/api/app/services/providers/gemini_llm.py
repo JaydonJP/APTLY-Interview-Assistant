@@ -18,7 +18,6 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.services.providers.base import (
     LLMGenerateRequest,

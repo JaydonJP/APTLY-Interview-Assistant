@@ -85,6 +85,19 @@ class Interview(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         lazy="selectin",
         cascade="all, delete-orphan",
     )
+    behavior_events: Mapped[list[Any]] = relationship(
+        "BehaviorEvent",
+        back_populates="interview",
+        order_by="BehaviorEvent.start_ms",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    visual_metrics: Mapped[list[Any]] = relationship(
+        "VisualDeliveryMetrics",
+        back_populates="interview",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Interview id={self.id} title={self.title} status={self.status}>"

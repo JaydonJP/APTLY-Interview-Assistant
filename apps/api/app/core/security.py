@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
 from jose import JWTError, jwt
 
 from app.core.logging import get_logger

@@ -21,7 +21,6 @@ from app.schemas.memory import (
     ContradictionItem,
     MemoryEntry,
     MemoryType,
-    SessionMemorySummary,
 )
 
 logger = get_logger(__name__)

@@ -12,6 +12,7 @@ Tests cover:
 """
 
 from uuid import uuid4
+
 import pytest
 from pydantic import ValidationError
 
@@ -21,7 +22,6 @@ from app.schemas.evidence import (
     EvidenceSource,
 )
 from app.services.interview_service import InterviewService
-
 
 # ── 1. Event Type & Source Enums ──────────────────────────────────────────────
 

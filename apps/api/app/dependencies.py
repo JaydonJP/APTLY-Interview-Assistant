@@ -300,8 +300,9 @@ async def get_transcription_provider(
 
 # ── Supabase Authentication ───────────────────────────────────────────────────
 
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi import Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from app.core.security import AuthenticatedUser, decode_supabase_token
 
 security_bearer = HTTPBearer(auto_error=False)

@@ -9,6 +9,10 @@ interface VideoPreviewProps {
   isRecording: boolean;
   isCameraReady: boolean;
   isMicReady: boolean;
+  faceDetected?: boolean;
+  calibrationProgress?: number;
+  calibrationState?: "CALIBRATING" | "READY" | "INTERVIEWING";
+  framingState?: string;
   className?: string;
 }
 
@@ -18,6 +22,10 @@ export function VideoPreview({
   isRecording,
   isCameraReady,
   isMicReady,
+  faceDetected = true,
+  calibrationProgress = 100,
+  calibrationState = "READY",
+  framingState = "CENTERED",
   className = "",
 }: VideoPreviewProps) {
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -118,6 +126,19 @@ export function VideoPreview({
             <Mic className="h-3 w-3" />
             <span>{isMicReady ? "MIC LIVE" : "CONNECTING MIC"}</span>
           </div>
+
+          {calibrationState === "CALIBRATING" && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-indigo-950/90 border border-indigo-500/60 px-2.5 py-1 text-[11px] font-mono font-bold text-indigo-200 backdrop-blur-md">
+              <span className="h-2 w-2 rounded-full bg-indigo-400 animate-ping" />
+              <span>CALIBRATING {calibrationProgress}%</span>
+            </div>
+          )}
+
+          {calibrationState !== "CALIBRATING" && framingState !== "CENTERED" && framingState !== "NO_FACE" && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-amber-950/90 border border-amber-500/60 px-2.5 py-1 text-[10px] font-mono font-bold text-amber-200 backdrop-blur-md">
+              <span>FRAMING: {framingState.replace("_", " ")}</span>
+            </div>
+          )}
         </div>
 
         {isRecording && (
@@ -134,7 +155,7 @@ export function VideoPreview({
           {recordedUrl ? "RECORDED PLAYBACK" : "LIVE CAMERA FEED"}
         </span>
         <span className="bg-slate-950/85 px-2.5 py-1 rounded-md border border-slate-800 backdrop-blur-md">
-          Capture preview
+          Vision Telemetry Active
         </span>
       </div>
     </div>
