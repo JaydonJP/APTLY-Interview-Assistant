@@ -189,13 +189,15 @@ The interfaces are separated so the inline path can later be moved behind Redis 
 | Browser capture | MediaDevices and MediaRecorder APIs | Camera/microphone permissions and recording |
 | Browser audio | Web Audio API | Live microphone level visualization |
 | Frontend tests | Vitest, Testing Library, JSDOM | Component and utility verification |
+| Frontend data client | `@supabase/supabase-js` with MCP-generated database types | Supabase Auth and typed browser integration |
 | Backend framework | FastAPI | Typed async REST API and OpenAPI generation |
 | Backend language | Python 3.11+ | Async services, provider integrations, data processing |
 | Validation | Pydantic 2 and pydantic-settings | Request/response contracts and environment configuration |
 | ORM | SQLAlchemy 2 async | Database models and async sessions |
 | PostgreSQL driver | asyncpg | Async PostgreSQL connectivity |
 | Migrations | Alembic | Versioned database schema changes |
-| Database | PostgreSQL 16 | Durable relational interview data |
+| Database | Supabase PostgreSQL 17 | Hosted durable relational interview data |
+| Authentication | Supabase Auth and JWT verification | Browser sessions and backend bearer-token validation |
 | Cache/queue foundation | Redis 7 | Configured for future jobs, cache, and session state |
 | Media conversion | FFmpeg | Normalizes WebM/video audio to 16 kHz mono WAV |
 | LLM interface | Provider abstraction | Allows mock mode and real providers without coupling services |
@@ -203,7 +205,8 @@ The interfaces are separated so the inline path can later be moved behind Redis 
 | Transcription interface | Mock or WhisperX/faster-whisper | Word-level transcript and timestamps |
 | Object storage | Supabase Storage | Private opaque recording keys; local disk is test-only |
 | Quality checks | Ruff, MyPy configuration, ESLint, TypeScript | Static correctness and maintainability |
-| Local orchestration | Docker Compose | PostgreSQL and Redis development services |
+| Supabase integration | Supabase MCP, Alembic, generated TypeScript types | Remote schema inspection, migrations, and typed client integration |
+| Local orchestration | Docker Compose | Optional Redis/integration-test sandbox; not the application database |
 
 Some packages and provider implementations exist as extension points but are not active in the default test configuration. The checked-in runtime example is configured for Supabase Storage, Gemini Flash analysis, Gemini TTS narration, and mock transcription unless WhisperX is explicitly enabled.
 
