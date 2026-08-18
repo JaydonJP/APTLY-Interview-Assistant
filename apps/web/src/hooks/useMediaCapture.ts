@@ -27,7 +27,7 @@ export interface MediaCaptureState {
   liveTranscript: string;
   error: string | null;
   startRecording: () => Promise<void>;
-  stopRecording: () => Promise<Blob | null>;
+  stopRecording: () => Promise<{ blob: Blob | null; transcript: string }>;
   resetRecording: () => void;
 }
 
@@ -400,8 +400,11 @@ export function useMediaCapture({
     }
   }, [enableAudio, enableVideo, getSupportedMimeType, recordedUrl]);
 
-  const stopRecording = useCallback((): Promise<Blob | null> => {
+  const stopRecording = useCallback((): Promise<{ blob: Blob | null; transcript: string }> => {
     return new Promise((resolve) => {
+      // Get finalized transcript from buffer
+      const finalTranscript = (transcriptBufferRef.current || liveTranscript || "").trim();
+
       // Stop speech recognition
       if (recognitionRef.current) {
         try {
@@ -418,7 +421,7 @@ export function useMediaCapture({
           clearInterval(timerRef.current);
           timerRef.current = null;
         }
-        resolve(recordedBlob);
+        resolve({ blob: recordedBlob, transcript: finalTranscript });
         return;
       }
 
@@ -440,12 +443,12 @@ export function useMediaCapture({
         const hash = await computeChecksum(finalBlob);
         setSha256Hash(hash);
 
-        resolve(finalBlob);
+        resolve({ blob: finalBlob, transcript: finalTranscript });
       };
 
       recorder.stop();
     });
-  }, [mimeType, recordedBlob]);
+  }, [liveTranscript, mimeType, recordedBlob]);
 
   const resetRecording = useCallback(() => {
     if (timerRef.current) {

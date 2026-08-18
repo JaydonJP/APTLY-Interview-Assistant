@@ -416,10 +416,9 @@ class InterviewService:
         from app.services.providers.base import TranscriptionResponse, TranscriptionWord
         transcription_res: TranscriptionResponse
 
-        # If live browser transcription provided actual words, use them directly for 100% precision
         clean_live_text = (transcript_text or "").strip()
-        if clean_live_text and len(clean_live_text.split()) >= 2:
-            dur = answer.duration_seconds or max(5.0, len(clean_live_text.split()) * 0.4)
+        if clean_live_text:
+            dur = answer.duration_seconds or max(3.0, len(clean_live_text.split()) * 0.45)
             words_list = clean_live_text.split()
             step_time = dur / max(1, len(words_list))
             live_words = [
@@ -450,27 +449,15 @@ class InterviewService:
                     )
                 )
             except Exception as tx_err:
-                logger.warning("transcription_provider_failed_using_safe_fallback", error=str(tx_err))
-                dur = answer.duration_seconds or 10.0
-                fallback_text = "In our architecture, we measured baseline latency at 650ms and reduced it by 45% using Redis caching and PostgreSQL query optimizations under 5,000 requests per second."
-                words_list = fallback_text.split()
-                step_time = dur / max(1, len(words_list))
-                fallback_words = [
-                    TranscriptionWord(
-                        word=w,
-                        start_seconds=round(i * step_time, 2),
-                        end_seconds=round((i + 1) * step_time, 2),
-                        confidence=0.90,
-                    )
-                    for i, w in enumerate(words_list)
-                ]
+                logger.warning("transcription_provider_failed", error=str(tx_err))
+                dur = answer.duration_seconds or 5.0
                 transcription_res = TranscriptionResponse(
-                    text=fallback_text,
-                    words=fallback_words,
+                    text="[No speech detected or silent answer]",
+                    words=[],
                     language="en",
                     duration_seconds=dur,
-                    provider="fallback_estimator",
-                    model_version="fallback-v1",
+                    provider="vad_silence_detector",
+                    model_version="1.0",
                 )
 
         words_data = [

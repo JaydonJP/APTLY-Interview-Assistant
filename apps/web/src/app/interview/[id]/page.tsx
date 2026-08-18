@@ -415,7 +415,7 @@ export default function LiveInterviewRoomPage() {
     setConvState("PROCESSING");
 
     try {
-      const blob = await stopRecording();
+      const { blob, transcript } = await stopRecording();
       if (!blob || blob.size === 0) {
         setIsSubmitting(false);
         isAutoSubmittingRef.current = false;
@@ -434,7 +434,8 @@ export default function LiveInterviewRoomPage() {
         setCurrentAnswer(createdAns);
       }
 
-      // Step 2: Upload recording
+      // Step 2: Upload recording with exact candidate transcript
+      const finalTranscript = (transcript || liveTranscript || "").trim();
       const formData = new FormData();
       formData.append(
         "audio_file",
@@ -442,8 +443,8 @@ export default function LiveInterviewRoomPage() {
         `recording_${currentQuestion.id}.webm`,
       );
       formData.append("duration_seconds", String(recordingDuration || 5.0));
-      if (liveTranscript && liveTranscript.trim().length > 0) {
-        formData.append("transcript_text", liveTranscript.trim());
+      if (finalTranscript.length > 0) {
+        formData.append("transcript_text", finalTranscript);
       }
 
       setConvState("THINKING");
