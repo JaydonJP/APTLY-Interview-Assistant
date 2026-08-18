@@ -80,6 +80,7 @@ async def analyze_job_description(
 async def get_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_db),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> JobResponse:
     """Retrieve job details by ID."""
     job = await db.get(Job, job_id)
@@ -87,6 +88,11 @@ async def get_job(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "JOB_NOT_FOUND", "message": f"Job '{job_id}' not found."},
+        )
+    if job.user_id and (not user or job.user_id != user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "ACCESS_DENIED", "message": "You do not have permission to view this job."},
         )
 
     # Fetch role profile

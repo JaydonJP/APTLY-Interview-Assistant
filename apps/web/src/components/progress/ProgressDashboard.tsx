@@ -92,24 +92,32 @@ export function ProgressDashboard() {
         const answers = s.answers || [];
         const totalWords = answers.reduce((acc, a) => acc + (a.speech_metrics?.total_words || 0), 0);
         const totalDuration = answers.reduce(
-          (acc, a) => acc + (a.speech_metrics?.speaking_duration_seconds || a.duration_seconds || 45),
+          (acc, a) => acc + (a.speech_metrics?.speaking_duration_seconds || a.duration_seconds || 0),
           0,
         );
-        const avgWpm = totalDuration > 0 ? Math.round((totalWords / totalDuration) * 60) : 140;
+        const hasSpeechMetrics = answers.some((a) => Boolean(a.speech_metrics));
+        const avgWpm = hasSpeechMetrics && totalDuration > 0 && totalWords > 0
+          ? Math.round((totalWords / totalDuration) * 60)
+          : null;
         const totalFillers = answers.reduce((acc, a) => acc + (a.speech_metrics?.filler_count || 0), 0);
         const contentScores = answers
           .map((a) => a.content_metrics?.overall_content_score)
           .filter((score): score is number => typeof score === "number");
         const avgContent = contentScores.length
           ? Math.round(contentScores.reduce((a, b) => a + b, 0) / contentScores.length)
-          : 78;
-        const deliveryScore = Math.max(50, Math.min(100, Math.round(100 - totalFillers * 3)));
+          : null;
+        const deliveryScore = hasSpeechMetrics
+          ? Math.max(0, Math.min(100, Math.round(100 - totalFillers * 3)))
+          : null;
         const evidenceScores = answers
           .map((a) => a.content_metrics?.evidence_score)
           .filter((score): score is number => typeof score === "number");
         const avgEvidence = evidenceScores.length
           ? Math.round(evidenceScores.reduce((a, b) => a + b, 0) / evidenceScores.length)
-          : Math.round(avgContent * 0.9);
+          : null;
+        const overallScore = avgContent !== null && deliveryScore !== null
+          ? Math.round(avgContent * 0.65 + deliveryScore * 0.35)
+          : null;
 
         return {
           session_id: s.id,
@@ -119,12 +127,12 @@ export function ProgressDashboard() {
             day: "numeric",
           }),
           title: s.title || `Session ${idx + 1}`,
-          overall_score: Math.round(avgContent * 0.65 + deliveryScore * 0.35),
+          overall_score: overallScore,
           content_score: avgContent,
           delivery_score: deliveryScore,
           evidence_score: avgEvidence,
-          structure_score: 80,
-          filler_count: totalFillers,
+          structure_score: contentScores.length ? avgContent : null,
+          filler_count: hasSpeechMetrics ? totalFillers : null,
           wpm: avgWpm,
         };
       });
@@ -147,7 +155,8 @@ export function ProgressDashboard() {
     if (completedSessions.length > 0) {
       completedSessions.forEach((session) => {
         (session.answers || []).forEach((ans) => {
-          const score = ans.content_metrics?.overall_content_score || 80;
+          const score = ans.content_metrics?.overall_content_score;
+          if (typeof score !== "number") return;
           const question = session.questions?.find((q) => q.id === ans.question_id);
           const category = (question?.category || "").toLowerCase();
           const competency = (question?.competency || "").toLowerCase();
@@ -187,7 +196,9 @@ export function ProgressDashboard() {
   const latestSession = hasSessions ? trendData[trendData.length - 1] : null;
   const firstSession = hasSessions ? trendData[0] : null;
   const scoreImprovement =
-    latestSession && firstSession && trendData.length > 1
+    latestSession?.overall_score !== null && latestSession?.overall_score !== undefined
+    && firstSession?.overall_score !== null && firstSession?.overall_score !== undefined
+    && trendData.length > 1
       ? Math.round(latestSession.overall_score - firstSession.overall_score)
       : 0;
 
@@ -249,7 +260,8 @@ export function ProgressDashboard() {
 
     const stepX = data.length > 1 ? (width - paddingLeft) / (data.length - 1) : 0;
     const coords = data.map((d, i) => {
-      const val = Math.min(100, Math.max(0, getMetricValue(d)));
+      const metricValue = getMetricValue(d);
+      const val = metricValue === null ? 0 : Math.min(100, Math.max(0, metricValue));
       const x = data.length === 1 ? width / 2 : paddingLeft + i * stepX;
       const y = paddingTop + height - (val / 100) * height;
       return { x, y, val, item: d, index: i };
@@ -354,7 +366,9 @@ export function ProgressDashboard() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="font-mono text-3xl font-bold text-white">
-                  {hasSessions && latestSession ? latestSession.overall_score : "--"}
+                  {hasSessions && latestSession?.overall_score !== null && latestSession?.overall_score !== undefined
+                    ? latestSession.overall_score
+                    : "—"}
                 </span>
                 <span className="text-xs text-slate-500">/ 100</span>
                 {hasSessions && scoreImprovement > 0 && (
@@ -366,7 +380,7 @@ export function ProgressDashboard() {
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-cyan-400 rounded-full transition-all duration-700"
-                  style={{ width: `${hasSessions && latestSession ? latestSession.overall_score : 0}%` }}
+                  style={{ width: `${hasSessions && latestSession?.overall_score !== null && latestSession?.overall_score !== undefined ? latestSession.overall_score : 0}%` }}
                 />
               </div>
               <p className="mt-2 text-[11px] text-slate-400">
@@ -384,7 +398,9 @@ export function ProgressDashboard() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="font-mono text-3xl font-bold text-white">
-                  {hasSessions && latestSession ? Math.round(latestSession.wpm) : "--"}
+                  {hasSessions && latestSession?.wpm !== null && latestSession?.wpm !== undefined
+                    ? Math.round(latestSession.wpm)
+                    : "—"}
                 </span>
                 <span className="text-xs font-mono text-slate-400">WPM</span>
                 {hasSessions && (
@@ -398,7 +414,9 @@ export function ProgressDashboard() {
                   className="h-full bg-emerald-400 rounded-full transition-all duration-700"
                   style={{
                     width: `${
-                      hasSessions && latestSession ? Math.min(100, (latestSession.wpm / 180) * 100) : 0
+                      hasSessions && latestSession?.wpm !== null && latestSession?.wpm !== undefined
+                        ? Math.min(100, (latestSession.wpm / 180) * 100)
+                        : 0
                     }%`,
                   }}
                 />
@@ -418,7 +436,9 @@ export function ProgressDashboard() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="font-mono text-3xl font-bold text-white">
-                  {hasSessions && latestSession ? latestSession.filler_count : "--"}
+                  {hasSessions && latestSession?.filler_count !== null && latestSession?.filler_count !== undefined
+                    ? latestSession.filler_count
+                    : "—"}
                 </span>
                 <span className="text-xs text-slate-500">per session</span>
                 {hasSessions && (
@@ -432,7 +452,9 @@ export function ProgressDashboard() {
                   className="h-full bg-amber-400 rounded-full transition-all duration-700"
                   style={{
                     width: `${
-                      hasSessions && latestSession ? Math.max(10, 100 - latestSession.filler_count * 10) : 0
+                      hasSessions && latestSession?.filler_count !== null && latestSession?.filler_count !== undefined
+                        ? Math.max(10, 100 - latestSession.filler_count * 10)
+                        : 0
                     }%`,
                   }}
                 />
@@ -452,7 +474,9 @@ export function ProgressDashboard() {
               </div>
               <div className="mt-4 flex items-baseline gap-2">
                 <span className="font-mono text-3xl font-bold text-white">
-                  {hasSessions && latestSession ? latestSession.evidence_score : "--"}
+                  {hasSessions && latestSession?.evidence_score !== null && latestSession?.evidence_score !== undefined
+                    ? latestSession.evidence_score
+                    : "—"}
                 </span>
                 <span className="text-xs text-slate-500">/ 100</span>
                 {hasSessions && (
@@ -464,7 +488,7 @@ export function ProgressDashboard() {
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-indigo-400 rounded-full transition-all duration-700"
-                  style={{ width: `${hasSessions && latestSession ? latestSession.evidence_score : 0}%` }}
+                  style={{ width: `${hasSessions && latestSession?.evidence_score !== null && latestSession?.evidence_score !== undefined ? latestSession.evidence_score : 0}%` }}
                 />
               </div>
               <p className="mt-2 text-[11px] text-slate-400">
@@ -639,7 +663,7 @@ export function ProgressDashboard() {
                             fontWeight="bold"
                             textAnchor="middle"
                           >
-                            {Math.round(pt.val)}
+                            {getMetricValue(pt.item) === null ? "—" : Math.round(pt.val)}
                           </text>
                           <text
                             x={pt.x}
@@ -674,18 +698,22 @@ export function ProgressDashboard() {
                       <div>
                         <span className="text-slate-400">Score: </span>
                         <span className="font-bold text-white">
-                          {Math.round(trendData[selectedSessionIndex].overall_score)}
+                          {trendData[selectedSessionIndex].overall_score === null
+                            ? "—"
+                            : Math.round(trendData[selectedSessionIndex].overall_score)}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-400">Pace: </span>
                         <span className="font-bold text-emerald-300">
-                          {Math.round(trendData[selectedSessionIndex].wpm)} WPM
+                          {trendData[selectedSessionIndex].wpm === null
+                            ? "—"
+                            : `${Math.round(trendData[selectedSessionIndex].wpm)} WPM`}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-400">Fillers: </span>
-                        <span className="font-bold text-amber-300">{trendData[selectedSessionIndex].filler_count}</span>
+                        <span className="font-bold text-amber-300">{trendData[selectedSessionIndex].filler_count ?? "—"}</span>
                       </div>
                       <Link
                         href={`/interview/${trendData[selectedSessionIndex].session_id}/review`}
@@ -847,13 +875,17 @@ export function ProgressDashboard() {
                         <h4 className="mt-1.5 text-sm font-semibold text-white line-clamp-1">{item.title}</h4>
                         <p className="text-[11px] text-slate-400">{item.session_date}</p>
                       </div>
-                      <span className="font-mono text-xl font-bold text-white">{Math.round(item.overall_score)}</span>
+                      <span className="font-mono text-xl font-bold text-white">
+                        {item.overall_score === null ? "—" : Math.round(item.overall_score)}
+                      </span>
                     </div>
 
                     <div className="flex justify-between border-t border-white/5 pt-2 text-[11px] font-mono text-slate-400">
-                      <span>{Math.round(item.wpm)} WPM</span>
-                      <span>{item.filler_count} Fillers</span>
-                      <span className="text-cyan-300">Depth {Math.round(item.content_score)}</span>
+                      <span>{item.wpm === null ? "—" : `${Math.round(item.wpm)} WPM`}</span>
+                      <span>{item.filler_count ?? "—"} Fillers</span>
+                      <span className="text-cyan-300">
+                        Depth {item.content_score === null ? "—" : Math.round(item.content_score)}
+                      </span>
                     </div>
                   </div>
                 ))}

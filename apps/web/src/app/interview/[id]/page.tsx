@@ -19,6 +19,7 @@ import {
   Clock,
   Cpu,
   Mic,
+  MicOff,
   Play,
   Radio,
   RefreshCw,
@@ -191,7 +192,7 @@ export default function LiveInterviewRoomPage() {
     interruptInterviewer,
   } = useGeminiLiveSession({
     interviewId,
-    enabled: Boolean(interviewId),
+    enabled: Boolean(interviewId && hasConsent === true && hasUserStarted),
   });
 
   // WebSocket hook for live session events & heartbeat
@@ -212,6 +213,7 @@ export default function LiveInterviewRoomPage() {
 
   // Auto-Submit ref to avoid duplicate submissions
   const isAutoSubmittingRef = useRef<boolean>(false);
+  const autoFinishAnswerRef = useRef<(() => Promise<void>) | null>(null);
 
   // Unified Media Capture Hook with VAD Callbacks
   const {
@@ -242,7 +244,7 @@ export default function LiveInterviewRoomPage() {
     onSpeechEnd: () => {
       sendEvent("candidate.stopped", { question_id: currentQuestion?.id });
       if (!isAutoSubmittingRef.current && !isSubmitting && isRecording) {
-        void handleAutoFinishAnswer();
+        void autoFinishAnswerRef.current?.();
       }
     },
   });
@@ -431,13 +433,6 @@ export default function LiveInterviewRoomPage() {
     void startRecording();
   };
 
-  // Enforce Maximum Answer Duration (180s)
-  useEffect(() => {
-    if (isRecording && recordingDuration >= 180) {
-      void handleAutoFinishAnswer();
-    }
-  }, [isRecording, recordingDuration]);
-
   // Auto-finish and submit turn
   const handleAutoFinishAnswer = async () => {
     if (isAutoSubmittingRef.current || isSubmitting || !currentQuestion) return;
@@ -519,6 +514,20 @@ export default function LiveInterviewRoomPage() {
       isAutoSubmittingRef.current = false;
     }
   };
+
+  useEffect(() => {
+    autoFinishAnswerRef.current = handleAutoFinishAnswer;
+    return () => {
+      autoFinishAnswerRef.current = null;
+    };
+  }, [handleAutoFinishAnswer]);
+
+  // Enforce Maximum Answer Duration (180s)
+  useEffect(() => {
+    if (isRecording && recordingDuration >= 180) {
+      void autoFinishAnswerRef.current?.();
+    }
+  }, [isRecording, recordingDuration]);
 
   // Complete Interview Early
   const handleFinishInterview = async () => {
@@ -602,6 +611,17 @@ export default function LiveInterviewRoomPage() {
             )}
           </button>
 
+          <button
+            type="button"
+            onClick={toggleMute}
+            disabled={!hasUserStarted}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            title="Mute the Gemini Live microphone stream"
+          >
+            {isMuted ? <MicOff className="h-3.5 w-3.5 text-rose-400" /> : <Mic className="h-3.5 w-3.5 text-emerald-400" />}
+            <span>{isMuted ? "Live Mic Muted" : "Live Mic On"}</span>
+          </button>
+
           {/* Progress Tracker */}
           <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300">
             <span>
@@ -619,7 +639,9 @@ export default function LiveInterviewRoomPage() {
             }`}
           >
             <Radio className="h-3 w-3 animate-pulse" />
-            <span>{isFallback ? "Offline fallback" : liveStatus}</span>
+            <span title={fallbackReason ?? `Event channel: ${wsStatus}`}>
+              {isFallback ? "Offline fallback" : liveStatus}
+            </span>
           </div>
         </div>
       </div>
@@ -765,6 +787,28 @@ export default function LiveInterviewRoomPage() {
                     <span className="font-mono text-[11px] text-emerald-400 font-bold tracking-wider uppercase block mb-0.5">Live Spoken Transcript:</span>
                     <p className="italic text-slate-100 leading-relaxed">&ldquo;{liveTranscript}&rdquo;</p>
                   </div>
+                </div>
+              )}
+
+              {(partialInputTranscript || partialOutputTranscript || liveWpm > 0) && (
+                <div className="mt-4 rounded-xl border border-violet-500/30 bg-violet-950/20 p-3.5 text-xs text-slate-300">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-violet-300">
+                      Gemini Live Stream
+                    </span>
+                    {liveWpm > 0 && <span className="font-mono text-[11px] text-violet-200">{liveWpm} live WPM</span>}
+                  </div>
+                  {partialInputTranscript && <p className="mt-2 text-slate-100">You: {partialInputTranscript}</p>}
+                  {partialOutputTranscript && <p className="mt-1 text-violet-100">Interviewer: {partialOutputTranscript}</p>}
+                  {partialOutputTranscript && (
+                    <button
+                      type="button"
+                      onClick={interruptInterviewer}
+                      className="mt-3 rounded-lg border border-violet-400/30 px-2.5 py-1.5 text-[11px] font-semibold text-violet-200 transition hover:bg-violet-500/20"
+                    >
+                      Interrupt interviewer
+                    </button>
+                  )}
                 </div>
               )}
 

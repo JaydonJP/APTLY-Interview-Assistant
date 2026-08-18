@@ -11,9 +11,6 @@ Aggregates real candidate session histories into a longitudinal coaching model:
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
-from typing import Any
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +19,6 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.interview import Interview
 from app.schemas.interview_twin import (
-    CompletedDrillRecord,
     EvidenceDebtItem,
     InterviewTwinProfile,
     SessionTrendPoint,
@@ -48,7 +44,9 @@ class InterviewTwinService:
         Builds the Interview Twin coaching profile from completed sessions.
         If user_id is provided, filters strictly to that user's private sessions.
         """
-        stmt = select(Interview).where(Interview.status == "completed")
+        stmt = select(Interview).where(
+            Interview.status == "completed", Interview.deleted_at.is_(None)
+        )
         if user_id:
             stmt = stmt.where(Interview.user_id == user_id)
 
@@ -68,14 +66,15 @@ class InterviewTwinService:
 
         for idx, interview in enumerate(completed_interviews, start=1):
             content_scores = []
-            delivery_scores = []
             evidence_scores = []
             structure_scores = []
             total_fillers = 0
+            has_speech_metrics = False
             wpm_list = []
 
             for ans in interview.answers:
                 if ans.speech_metrics:
+                    has_speech_metrics = True
                     total_fillers += ans.speech_metrics.filler_count
                     if ans.speech_metrics.wpm > 0:
                         wpm_list.append(ans.speech_metrics.wpm)
@@ -97,12 +96,20 @@ class InterviewTwinService:
                     for missing in dna.missing_dimensions:
                         evidence_debt_counter[missing] += 1
 
-            avg_content = round(sum(content_scores) / len(content_scores), 1) if content_scores else 75.0
-            avg_evidence = round(sum(evidence_scores) / len(evidence_scores), 1) if evidence_scores else 70.0
-            avg_structure = round(sum(structure_scores) / len(structure_scores), 1) if structure_scores else 70.0
-            avg_wpm = round(sum(wpm_list) / len(wpm_list), 1) if wpm_list else 140.0
-            delivery_score = max(0.0, min(100.0, 100.0 - (total_fillers * 3.0)))
-            overall = round((avg_content * 0.65) + (delivery_score * 0.35), 1)
+            avg_content = round(sum(content_scores) / len(content_scores), 1) if content_scores else None
+            avg_evidence = round(sum(evidence_scores) / len(evidence_scores), 1) if evidence_scores else None
+            avg_structure = round(sum(structure_scores) / len(structure_scores), 1) if structure_scores else None
+            avg_wpm = round(sum(wpm_list) / len(wpm_list), 1) if wpm_list else None
+            delivery_score = (
+                max(0.0, min(100.0, 100.0 - (total_fillers * 3.0)))
+                if has_speech_metrics
+                else None
+            )
+            overall = (
+                round((avg_content * 0.65) + (delivery_score * 0.35), 1)
+                if avg_content is not None and delivery_score is not None
+                else None
+            )
 
             session_date_str = (
                 interview.completed_at.strftime("%b %d, %Y")
@@ -121,7 +128,7 @@ class InterviewTwinService:
                     delivery_score=delivery_score,
                     evidence_score=avg_evidence,
                     structure_score=avg_structure,
-                    filler_count=total_fillers,
+                    filler_count=total_fillers if has_speech_metrics else None,
                     wpm=avg_wpm,
                 )
             )

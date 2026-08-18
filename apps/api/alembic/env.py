@@ -27,10 +27,8 @@ from alembic import context
 # Ensure app package is importable from alembic/ directory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import app.models  # noqa: F401
 from app.config import get_settings
-
-# Import all models so Alembic can detect them
-from app.models import interview  # noqa: F401
 from app.models.base import Base
 
 # ── Alembic Config Object ─────────────────────────────────────────────────────

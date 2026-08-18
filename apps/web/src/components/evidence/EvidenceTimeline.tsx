@@ -68,7 +68,10 @@ export function EvidenceTimeline({
         const query = searchQuery.toLowerCase();
         const matchTitle = e.title.toLowerCase().includes(query);
         const matchExplanation = (e.explanation || e.description || "").toLowerCase().includes(query);
-        const matchQuote = (e.payload?.quote || e.quote || "").toLowerCase().includes(query);
+        const payloadQuote = e.payload?.quote;
+        const matchQuote = (typeof payloadQuote === "string" ? payloadQuote : e.quote || "")
+          .toLowerCase()
+          .includes(query);
         if (!matchTitle && !matchExplanation && !matchQuote) return false;
       }
 

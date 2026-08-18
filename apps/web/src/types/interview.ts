@@ -145,8 +145,6 @@ export interface VisionFrameEvent {
   face_height: number;
   eye_contact: boolean;
   confidence: number;
-  expressionSignal?: "neutral" | "engaged" | "strained" | "unavailable";
-  expressionConfidence?: number;
 }
 
 export interface VisionMetrics {
@@ -164,8 +162,6 @@ export interface VisionMetrics {
   face_centering_score?: number | null;
   tracking_confidence?: number | null;
   visual_communication_score?: number | null;
-  expression_signal: "neutral" | "engaged" | "strained" | "unavailable" | string;
-  expression_confidence?: number | null;
   face_presence_events: VisionFrameEvent[];
   strengths: string[];
   improvements: string[];

@@ -134,7 +134,20 @@ class InterviewService:
         role_profile: RoleProfile | None = None
         if role_profile_id:
             role_profile = await self.db.get(RoleProfile, role_profile_id)
+            if role_profile:
+                role_job = await self.db.get(Job, role_profile.job_id)
+                if role_job and role_job.user_id and role_job.user_id != user_id:
+                    raise AptlyException(
+                        "You do not have permission to use this role profile.",
+                        code="ACCESS_DENIED",
+                    )
         elif job_id:
+            job = await self.db.get(Job, job_id)
+            if job and job.user_id and job.user_id != user_id:
+                raise AptlyException(
+                    "You do not have permission to use this job description.",
+                    code="ACCESS_DENIED",
+                )
             stmt = select(RoleProfile).where(RoleProfile.job_id == job_id)
             res = await self.db.execute(stmt)
             role_profile = res.scalar_one_or_none()
@@ -183,7 +196,7 @@ class InterviewService:
         # 3. Retrieve Interview Twin coaching history to inform generation
         from app.services.interview_twin_service import InterviewTwinService
         twin_service = InterviewTwinService()
-        twin_profile = await twin_service.get_twin_profile(self.db)
+        twin_profile = await twin_service.get_twin_profile(self.db, user_id=user_id)
 
         # Generate Questions informed by previous sessions & panel mode
         questions = await self.question_generator.generate_questions(
@@ -219,11 +232,12 @@ class InterviewService:
 
         stmt = (
             select(Interview)
-            .where(Interview.user_id == user_id)
+            .where(Interview.user_id == user_id, Interview.deleted_at.is_(None))
             .options(
                 selectinload(Interview.role_profile),
                 selectinload(Interview.questions),
                 selectinload(Interview.answers),
+                selectinload(Interview.answers).selectinload(Answer.vision_metrics),
             )
             .order_by(Interview.created_at.desc())
             .limit(limit)
@@ -236,13 +250,14 @@ class InterviewService:
         """Fetch full interview entity with eager-loaded relationships."""
         stmt = (
             select(Interview)
-            .where(Interview.id == interview_id)
+            .where(Interview.id == interview_id, Interview.deleted_at.is_(None))
             .options(
                 selectinload(Interview.role_profile),
                 selectinload(Interview.questions),
                 selectinload(Interview.answers).selectinload(Answer.transcript),
                 selectinload(Interview.answers).selectinload(Answer.speech_metrics),
                 selectinload(Interview.answers).selectinload(Answer.content_metrics),
+                selectinload(Interview.answers).selectinload(Answer.vision_metrics),
                 selectinload(Interview.answers).selectinload(Answer.question),
             )
         )
@@ -266,6 +281,40 @@ class InterviewService:
             await self.db.refresh(interview)
 
         return interview
+
+    async def delete_interview(self, interview_id: UUID) -> None:
+        """Delete media immediately and soft-delete the interview metadata."""
+        interview = await self.get_interview_detail(interview_id)
+        if not interview:
+            raise AptlyException(
+                f"Interview '{interview_id}' not found.", code="INTERVIEW_NOT_FOUND"
+            )
+
+        storage_keys = [
+            key
+            for answer in interview.answers
+            for key in (
+                answer.audio_storage_key,
+                answer.video_storage_key,
+                answer.normalized_storage_key,
+            )
+            if key
+        ]
+        for storage_key in dict.fromkeys(storage_keys):
+            try:
+                await self.storage_provider.delete(storage_key)
+            except Exception as exc:
+                # Metadata deletion should not be blocked by an already-expired
+                # object; keep an audit trail in logs for lifecycle repair.
+                logger.warning(
+                    "interview_media_delete_failed",
+                    interview_id=str(interview_id),
+                    storage_key=storage_key,
+                    error=str(exc)[:200],
+                )
+
+        interview.deleted_at = datetime.now(UTC)
+        await self.db.commit()
 
     async def create_answer(self, interview_id: UUID, question_id: UUID) -> Answer:
         """Create a candidate answer record for the active question."""
@@ -812,7 +861,11 @@ Keep the response under 120 words and do not ask a new interview question."""
         structured content evaluator (AI_EVALUATED). Every report insight is strictly traceable
         to one or more evidence events.
         """
-        from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+        from app.schemas.evidence import (
+            EvidenceEvent,
+            EvidenceEventType,
+            EvidenceSource,
+        )
 
         evidence_events: list[EvidenceEvent] = []
         habits: list[dict[str, Any]] = []
@@ -908,11 +961,7 @@ Keep the response under 120 words and do not ask a new interview question."""
                 end = float(evidence.get("end_seconds", start))
                 start_ms = max(0, int(start * 1000))
                 end_ms = max(start_ms, int(end * 1000))
-                evt_type = (
-                    EvidenceEventType.STRONG_EVIDENCE
-                    if str(evidence.get("type", "")).upper() == "STRENGTH"
-                    else EvidenceEventType.STRONG_EVIDENCE
-                )
+                evt_type = EvidenceEventType.STRONG_EVIDENCE
                 evt = EvidenceEvent(
                     id=f"evt-anchor-{question_number}-{evidence.get('id', index)}",
                     session_id=session_id,
@@ -1448,8 +1497,6 @@ Keep the response under 120 words and do not ask a new interview question."""
                         "face_centering_score": vm.face_centering_score,
                         "tracking_confidence": vm.tracking_confidence,
                         "visual_communication_score": vm.visual_communication_score,
-                        "expression_signal": vm.expression_signal,
-                        "expression_confidence": vm.expression_confidence,
                         "face_presence_events": vm.face_presence_events_json,
                         "strengths": vm.strengths_json,
                         "improvements": vm.improvements_json,
@@ -1457,7 +1504,9 @@ Keep the response under 120 words and do not ask a new interview question."""
                     }
 
             # Extract Answer DNA (Technical or Behavioral)
-            from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+            from app.services.content_intelligence.answer_dna_service import (
+                AnswerDNAService,
+            )
 
             dna_service = AnswerDNAService()
             transcript_text = (item.get("transcript") or {}).get("full_text") or ""
@@ -1520,7 +1569,9 @@ Keep the response under 120 words and do not ask a new interview question."""
 
         target_competencies = list(dict.fromkeys(target_competencies))
 
-        from app.services.content_intelligence.answer_dna_service import AnswerDNAService
+        from app.services.content_intelligence.answer_dna_service import (
+            AnswerDNAService,
+        )
         dna_service = AnswerDNAService()
         competency_coverage = dna_service.evaluate_session_competencies(
             interview_id=str(interview.id),

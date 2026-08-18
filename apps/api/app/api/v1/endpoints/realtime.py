@@ -23,7 +23,6 @@ from app.dependencies import (
     _get_llm_provider_instance,
     _get_storage_provider_instance,
     _get_transcription_provider_instance,
-    _get_tts_provider_instance,
     get_session_factory,
 )
 from app.domain.realtime_events import PROTOCOL_VERSION
@@ -108,11 +107,11 @@ async def interview_realtime_websocket(
     await manager.connect(interview_id, websocket)
 
     settings = get_settings()
-    session_factory = get_session_factory(settings.database_url)
+    database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+    session_factory = get_session_factory(database_url)
 
     llm = _get_llm_provider_instance(settings.llm_provider, settings.llm_api_key)
     stt = _get_transcription_provider_instance(settings.transcription_provider, settings.transcription_api_key)
-    tts = _get_tts_provider_instance(settings.tts_provider)
     storage = _get_storage_provider_instance(
         settings.storage_provider,
         settings.storage_endpoint,
@@ -168,8 +167,6 @@ async def interview_realtime_websocket(
             try:
                 data = json.loads(raw_text)
                 msg_type = data.get("type", "")
-                payload = data.get("payload", {})
-
                 if msg_type == "heartbeat.ping":
                     await manager.send_envelope(
                         websocket,

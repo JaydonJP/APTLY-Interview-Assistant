@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
 from jose import JWTError, jwt
 
 from app.core.logging import get_logger
@@ -28,7 +29,12 @@ class AuthenticatedUser:
     metadata: dict[str, Any] | None = None
 
 
-def decode_supabase_token(token: str, secret: str = "") -> AuthenticatedUser | None:
+def decode_supabase_token(
+    token: str,
+    secret: str = "",
+    issuer: str = "",
+    audience: str = "authenticated",
+) -> AuthenticatedUser | None:
     """
     Decode and validate a Supabase JWT access token.
     Extracts the user ID ('sub'), email, and metadata.
@@ -37,9 +43,30 @@ def decode_supabase_token(token: str, secret: str = "") -> AuthenticatedUser | N
         return None
 
     try:
-        # Supabase access tokens are standard JWTs
-        # Extract claims safely
-        claims = jwt.get_unverified_claims(token)
+        if not secret:
+            logger.warning(
+                "invalid_auth_token",
+                error="Supabase JWT secret is not configured",
+            )
+            return None
+
+        header = jwt.get_unverified_header(token)
+        algorithm = header.get("alg")
+        if algorithm not in {"HS256", "HS384", "HS512"}:
+            logger.warning("invalid_auth_token", error="Unsupported JWT signing algorithm")
+            return None
+
+        claims = jwt.decode(
+            token,
+            secret,
+            algorithms=[algorithm],
+            audience=audience if audience else None,
+            issuer=issuer if issuer else None,
+            options={
+                "verify_aud": bool(audience),
+                "verify_iss": bool(issuer),
+            },
+        )
         user_id = claims.get("sub") or claims.get("user_id") or claims.get("id")
         if not user_id:
             return None
@@ -112,9 +139,10 @@ def validate_media_size(size_bytes: int) -> bool:
 
 class RateLimiter:
     """
-    Rate limiter interface (Phase 0: no-op implementation).
+    Small dependency-free sliding-window limiter.
 
-    Phase 1+: Replace with a Redis-backed sliding window limiter.
+    Production deployments should provide a shared Redis implementation around
+    the same interface so limits apply across API replicas.
 
     Usage (future):
         limiter = RateLimiter(redis_client=redis)
@@ -125,15 +153,28 @@ class RateLimiter:
         """
         Check if the rate limit has been exceeded.
 
-        Phase 0: Always returns True (no actual limiting).
-        Phase 1: Implement Redis sliding window counter.
-
         Returns:
             True if the request is within limits (should proceed).
             False if the rate limit is exceeded (should reject).
         """
-        # TODO Phase 1: implement Redis-backed rate limiting
-        logger.debug(
-            "rate_limit_check_noop", key=key, limit=limit, window=window_seconds
-        )
+        import time
+
+        now = time.monotonic()
+        bucket = getattr(self, "_buckets", None)
+        if bucket is None:
+            bucket = self._buckets = {}
+        timestamps = [
+            stamp for stamp in bucket.get(key, []) if now - stamp < window_seconds
+        ]
+        if len(timestamps) >= limit:
+            bucket[key] = timestamps
+            logger.warning(
+                "rate_limit_exceeded",
+                key=key,
+                limit=limit,
+                window=window_seconds,
+            )
+            return False
+        timestamps.append(now)
+        bucket[key] = timestamps
         return True

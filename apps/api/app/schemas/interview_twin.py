@@ -12,9 +12,6 @@ Defines the longitudinal coaching history model (NOT personality profiling):
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import UUID
-
 from pydantic import Field
 
 from app.schemas.common import AptlyBaseModel
@@ -27,13 +24,13 @@ class SessionTrendPoint(AptlyBaseModel):
     session_number: int
     session_date: str
     title: str
-    overall_score: float = Field(ge=0.0, le=100.0)
-    content_score: float = Field(ge=0.0, le=100.0)
-    delivery_score: float = Field(ge=0.0, le=100.0)
-    evidence_score: float = Field(ge=0.0, le=100.0)
-    structure_score: float = Field(ge=0.0, le=100.0)
-    filler_count: int = 0
-    wpm: float = 0.0
+    overall_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    content_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    delivery_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    evidence_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    structure_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    filler_count: int | None = None
+    wpm: float | None = None
 
 
 class EvidenceDebtItem(AptlyBaseModel):

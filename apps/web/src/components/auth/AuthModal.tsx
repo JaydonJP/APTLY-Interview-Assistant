@@ -79,8 +79,8 @@ export function AuthModal() {
           closeAuthModal();
         }, 800);
       }
-    } catch (err: any) {
-      setErrorMsg(err?.message || "An unexpected authentication error occurred.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "An unexpected authentication error occurred.");
     } finally {
       setIsLoading(false);
     }

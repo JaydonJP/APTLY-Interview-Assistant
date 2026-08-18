@@ -58,7 +58,8 @@ class Settings(BaseSettings):
 
     # ── Database ───────────────────────────────────────────────
     database_url: str = Field(
-        default="postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev"
+        default="",
+        description="Explicit async database URL; local development may use SQLite",
     )
 
     # ── Redis ──────────────────────────────────────────────────
@@ -84,6 +85,19 @@ class Settings(BaseSettings):
         default="",
         description="Supabase anonymous key for public client operations",
     )
+    supabase_jwt_secret: str = Field(
+        default="",
+        description="Supabase JWT signing secret; required to accept bearer tokens",
+    )
+    supabase_jwt_issuer: str = Field(
+        default="",
+        description="Optional Supabase JWT issuer URL",
+    )
+    supabase_jwt_audience: str = Field(default="authenticated")
+    allow_guest_sessions: bool = Field(
+        default=True,
+        description="Allow explicitly identified browser practice sessions without Supabase auth",
+    )
 
     # ── LLM Providers (Gemini / Ollama Qwen / Mock) ───────────
     llm_provider: Literal["mock", "gemini", "qwen", "ollama"] = "mock"
@@ -105,6 +119,9 @@ class Settings(BaseSettings):
     # ── TTS Provider (ElevenLabs Streaming Voice Engine) ──────
     tts_provider: Literal["mock", "elevenlabs", "gemini"] = "mock"
     tts_api_key: str = ""
+    tts_model: str = "gemini-3.1-flash-tts-preview"
+    tts_voice: str = "Kore"
+    tts_timeout_seconds: float = 30.0
     elevenlabs_api_key: str = Field(default="", description="ElevenLabs API key (server-side only)")
     elevenlabs_model_id: str = Field(default="eleven_flash_v2_5", description="ElevenLabs low-latency voice model")
     elevenlabs_hr_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="Voice ID for Sarah Chen (HR Lead)")
@@ -168,7 +185,7 @@ class Settings(BaseSettings):
         """Normalize database URL for asyncpg if raw postgres:// or postgresql:// is provided."""
         if isinstance(v, str):
             if not v.strip():
-                return "sqlite+aiosqlite:///./aptly.db"
+                return ""
             if v.startswith("postgres://"):
                 return v.replace("postgres://", "postgresql+asyncpg://", 1)
             if v.startswith("postgresql://") and not v.startswith("postgresql+"):

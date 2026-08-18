@@ -28,6 +28,8 @@ async def get_interview_twin(
     Returns the persistent Interview Twin coaching history synthesized from completed sessions.
     Strictly scoped to the authenticated user's private session data.
     """
-    user_id = user.id if user else None
+    # The service's unscoped mode is useful for isolated unit tests, but an API
+    # request without an identity must never aggregate every candidate's data.
+    user_id = user.id if user else "__unauthenticated__"
     service = InterviewTwinService()
     return await service.get_twin_profile(db, user_id=user_id)

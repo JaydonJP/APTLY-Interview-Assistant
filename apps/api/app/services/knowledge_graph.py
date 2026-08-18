@@ -192,6 +192,7 @@ class KnowledgeGraphService:
                     select(func.count(Interview.id)).where(
                         Interview.learner_id == learner_id,
                         Interview.status == "completed",
+                        Interview.deleted_at.is_(None),
                     )
                 )
             ).scalar_one()
@@ -201,7 +202,12 @@ class KnowledgeGraphService:
                 await db.execute(
                     select(func.count(Answer.id))
                     .join(Interview, Interview.id == Answer.interview_id)
-                    .where(Interview.learner_id == learner_id, Answer.processing_status == "processed")
+                    .where(
+                        Interview.learner_id == learner_id,
+                        Interview.status == "completed",
+                        Interview.deleted_at.is_(None),
+                        Answer.processing_status == "processed",
+                    )
                 )
             ).scalar_one()
         )

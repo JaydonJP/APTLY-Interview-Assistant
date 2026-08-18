@@ -58,28 +58,31 @@ async function parseErrorResponse(
   response: Response,
 ): Promise<ErrorResponse["error"]> {
   try {
-    const data = (await response.json()) as any;
+    const data = (await response.json()) as unknown;
     if (data && typeof data === "object") {
-      if (data.error && typeof data.error === "object") {
+      const payload = data as Record<string, unknown>;
+      const errorPayload = payload.error;
+      if (errorPayload && typeof errorPayload === "object") {
+        const error = errorPayload as Record<string, unknown>;
         return {
-          code: data.error.code || "API_ERROR",
-          message: data.error.message || response.statusText || "Request failed",
-          request_id: data.error.request_id || response.headers.get("x-request-id") || "",
+          code: typeof error.code === "string" ? error.code : "API_ERROR",
+          message: typeof error.message === "string" ? error.message : response.statusText || "Request failed",
+          request_id: typeof error.request_id === "string" ? error.request_id : response.headers.get("x-request-id") || "",
         };
       }
-      if (data.detail) {
+      if (payload.detail) {
         const detailMsg =
-          typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+          typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
         return {
           code: `HTTP_${response.status}`,
           message: detailMsg,
           request_id: response.headers.get("x-request-id") || "",
         };
       }
-      if (data.message) {
+      if (typeof payload.message === "string") {
         return {
-          code: data.code || `HTTP_${response.status}`,
-          message: data.message,
+          code: typeof payload.code === "string" ? payload.code : `HTTP_${response.status}`,
+          message: payload.message,
           request_id: response.headers.get("x-request-id") || "",
         };
       }

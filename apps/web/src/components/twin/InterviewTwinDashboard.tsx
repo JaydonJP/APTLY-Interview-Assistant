@@ -115,7 +115,7 @@ export function InterviewTwinDashboard({ twin }: InterviewTwinDashboardProps) {
                     <p className="text-[11px] text-slate-500">{s.session_date}</p>
                   </div>
                   <div className="text-right">
-                    <span className="font-mono text-2xl font-semibold text-white">{Math.round(s.overall_score)}</span>
+                    <span className="font-mono text-2xl font-semibold text-white">{s.overall_score == null ? "—" : Math.round(s.overall_score)}</span>
                     <p className="text-[10px] uppercase text-slate-500">Overall</p>
                   </div>
                 </div>
@@ -123,19 +123,19 @@ export function InterviewTwinDashboard({ twin }: InterviewTwinDashboardProps) {
                 <div className="space-y-2 border-t border-white/5 pt-3 text-xs">
                   <div className="flex justify-between text-slate-400">
                     <span>Content Score</span>
-                    <span className="font-mono text-white">{Math.round(s.content_score)}</span>
+                    <span className="font-mono text-white">{s.content_score == null ? "—" : Math.round(s.content_score)}</span>
                   </div>
                   <div className="flex justify-between text-slate-400">
                     <span>Evidence Score</span>
-                    <span className="font-mono text-cyan-200">{Math.round(s.evidence_score)}</span>
+                    <span className="font-mono text-cyan-200">{s.evidence_score == null ? "—" : Math.round(s.evidence_score)}</span>
                   </div>
                   <div className="flex justify-between text-slate-400">
                     <span>Delivery Score</span>
-                    <span className="font-mono text-emerald-200">{Math.round(s.delivery_score)}</span>
+                    <span className="font-mono text-emerald-200">{s.delivery_score == null ? "—" : Math.round(s.delivery_score)}</span>
                   </div>
                   <div className="flex justify-between text-slate-400">
                     <span>Filler Words</span>
-                    <span className="font-mono text-amber-200">{s.filler_count}</span>
+                    <span className="font-mono text-amber-200">{s.filler_count == null ? "—" : s.filler_count}</span>
                   </div>
                 </div>
 

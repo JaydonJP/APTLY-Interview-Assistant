@@ -3,13 +3,13 @@ export interface SessionTrendPoint {
   session_number: number;
   session_date: string;
   title: string;
-  overall_score: number;
-  content_score: number;
-  delivery_score: number;
-  evidence_score: number;
-  structure_score: number;
-  filler_count: number;
-  wpm: number;
+  overall_score: number | null;
+  content_score: number | null;
+  delivery_score: number | null;
+  evidence_score: number | null;
+  structure_score: number | null;
+  filler_count: number | null;
+  wpm: number | null;
 }
 
 export interface EvidenceDebtItem {

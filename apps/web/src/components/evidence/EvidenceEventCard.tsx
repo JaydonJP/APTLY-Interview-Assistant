@@ -26,7 +26,11 @@ export function EvidenceEventCard({
   const sourceBadge = getSourceBadge(event.source);
   const startMs = event.start_ms ?? (event.start_seconds ? event.start_seconds * 1000 : 0);
   const endMs = event.end_ms ?? (event.end_seconds ? event.end_seconds * 1000 : startMs);
-  const quote = event.payload?.quote || event.quote || event.payload?.word;
+  const payloadQuote = event.payload?.quote;
+  const payloadWord = event.payload?.word;
+  const quote = [payloadQuote, event.quote, payloadWord].find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
 
   const getIcon = () => {
     switch (event.type) {
@@ -107,7 +111,7 @@ export function EvidenceEventCard({
       {quote && (
         <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-white/6 bg-black/25 px-3 py-2 text-xs text-slate-300">
           <Quote className="h-3 w-3 shrink-0 text-slate-500 mt-0.5" />
-          <span className="italic line-clamp-2">"{quote}"</span>
+          <span className="italic line-clamp-2">&ldquo;{quote}&rdquo;</span>
         </div>
       )}
     </div>

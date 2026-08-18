@@ -89,9 +89,52 @@ const DRILL_CATALOG: DrillItem[] = [
   },
 ];
 
+interface SpeechRecognitionResultLike {
+  0: { transcript: string };
+  length: number;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 interface IWindowWithSpeech extends Window {
-  SpeechRecognition?: any;
-  webkitSpeechRecognition?: any;
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+}
+
+interface RepairDelta {
+  metric_name: string;
+  before_value: number;
+  after_value: number;
+  delta: number;
+  improved: boolean;
+  display_text: string;
+}
+
+interface RepairEvaluationResult {
+  weakness_title?: string;
+  evidence_snippet?: string;
+  explanation?: string;
+  drill?: string;
+  drill_instructions?: string;
+  improvement_verified?: boolean;
+  summary_verdict?: string;
+  deltas?: RepairDelta[];
 }
 
 export function RepairModeModal({
@@ -112,8 +155,8 @@ export function RepairModeModal({
   const [retryText, setRetryText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [evaluationResult, setEvaluationResult] = useState<any | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const [evaluationResult, setEvaluationResult] = useState<RepairEvaluationResult | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -157,7 +200,7 @@ export function RepairModeModal({
         setIsRecording(true);
       };
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: SpeechRecognitionEventLike) => {
         let fullTranscript = "";
         for (let i = 0; i < event.results.length; i++) {
           fullTranscript += event.results[i][0].transcript + " ";
@@ -194,7 +237,7 @@ export function RepairModeModal({
 
     setIsEvaluating(true);
     try {
-      const res = await apiClient.post<any>(`/api/v1/interviews/${interviewId}/repair`, {
+      const res = await apiClient.post<RepairEvaluationResult>(`/api/v1/interviews/${interviewId}/repair`, {
         question_id: questionId,
         retry_transcript: retryText,
         drill_type: selectedDrill.id,
@@ -333,7 +376,7 @@ export function RepairModeModal({
                 type="button"
                 onClick={() => {
                   if (st.num <= level || (st.num === 3 && retryText) || (st.num === 4 && evaluationResult)) {
-                    setLevel(st.num as any);
+                    setLevel(st.num as 1 | 2 | 3 | 4);
                   }
                 }}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg transition font-bold ${
@@ -608,7 +651,7 @@ export function RepairModeModal({
 
               {/* Before vs After Metric Delta Tiles */}
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                {evaluationResult.deltas?.map((d: any) => {
+                {evaluationResult.deltas?.map((d) => {
                   const isPositive = d.improved;
                   return (
                     <div

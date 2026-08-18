@@ -33,7 +33,7 @@ export interface EvidenceEvent {
   reliability: number; // 0.0 to 1.0
   title: string;
   explanation: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
   source: EvidenceSource;
 
   // Backward compatibility aliases

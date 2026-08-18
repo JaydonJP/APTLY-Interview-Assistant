@@ -680,16 +680,13 @@ export default function InterviewReviewPage() {
                   <p className="text-slate-400">
                     {Math.round((currentItem.vision_metrics.face_detected_ratio ?? 0) * 100)}% face visibility · {Math.round((currentItem.vision_metrics.eye_contact_ratio ?? 0) * 100)}% camera-facing opportunity · {Math.round((currentItem.vision_metrics.multiple_people_ratio ?? 0) * 100)}% multi-person frames
                   </p>
-                  <p className="text-slate-500">
-                    Observable expression cue: <span className="text-slate-300">{currentItem.vision_metrics.expression_signal}</span>{currentItem.vision_metrics.expression_confidence != null ? ` (${Math.round(currentItem.vision_metrics.expression_confidence * 100)}% confidence)` : ""}
-                  </p>
                   {currentItem.vision_metrics.strengths.slice(0, 2).map((strength) => (
                     <p key={strength} className="text-emerald-200">+ {strength}</p>
                   ))}
                   {currentItem.vision_metrics.improvements.slice(0, 2).map((improvement) => (
                     <p key={improvement} className="text-amber-200">→ {improvement}</p>
                   ))}
-                  <p className="pt-1 text-[10px] leading-4 text-slate-500">Eye direction and expression cues are low-confidence communication signals, not identity or emotion diagnoses.</p>
+                  <p className="pt-1 text-[10px] leading-4 text-slate-500">These are observable framing signals for candidate coaching only; they never feed competency or hiring scores.</p>
                 </div>
               ) : (
                 <p className="mt-3 text-xs leading-relaxed text-slate-400">

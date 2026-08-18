@@ -10,6 +10,11 @@ from uuid import UUID
 
 from pydantic import Field
 
+from app.schemas.answer_dna import (
+    BehavioralAnswerDNA,
+    SessionCompetencyCoverage,
+    TechnicalAnswerDNA,
+)
 from app.schemas.common import AptlyBaseModel, VersionedSchema
 from app.schemas.content_intelligence import (
     ClaimItem,
@@ -18,6 +23,7 @@ from app.schemas.content_intelligence import (
     PracticeDrill,
     StarAnalysis,
 )
+from app.schemas.evidence import EvidenceEvent
 from app.schemas.jobs import RoleProfileResponse
 from app.schemas.panel import PanelInterviewReport, PersonaProfile
 
@@ -119,8 +125,6 @@ class VisionMetricsResponse(VersionedSchema):
     face_centering_score: float | None = Field(default=None, ge=0.0, le=1.0)
     tracking_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     visual_communication_score: float | None = Field(default=None, ge=0.0, le=100.0)
-    expression_signal: str = "unavailable"
-    expression_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     face_presence_events: list[dict[str, Any]] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     improvements: list[str] = Field(default_factory=list)
@@ -257,14 +261,6 @@ class InterviewDetailResponse(InterviewResponse):
 
 
 # ── Post-Interview Review Schemas ─────────────────────────────────────────────
-
-
-from app.schemas.answer_dna import (
-    BehavioralAnswerDNA,
-    SessionCompetencyCoverage,
-    TechnicalAnswerDNA,
-)
-from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
 
 
 class QuestionReviewItem(AptlyBaseModel):

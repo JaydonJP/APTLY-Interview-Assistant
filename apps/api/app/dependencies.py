@@ -26,7 +26,8 @@ from collections.abc import AsyncGenerator
 from functools import lru_cache
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import (
 
 from app.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.core.security import AuthenticatedUser, decode_supabase_token
 from app.services.providers.base import LLMProvider, TranscriptionProvider, TTSProvider
 from app.services.providers.mock_llm import MockLLMProvider
 from app.services.providers.mock_transcription import MockTranscriptionProvider
@@ -163,6 +165,7 @@ def _get_llm_provider_instance(
         logger.info("llm_provider_init", provider="mock")
         return MockLLMProvider()
     if provider in ("qwen", "ollama"):
+        from app.services.providers.gemini_llm import GeminiLLMProvider
         from app.services.providers.ollama_llm import OllamaLLMProvider
 
         logger.info("llm_provider_init", provider="ollama", model=ollama_model)
@@ -330,14 +333,11 @@ async def get_transcription_provider(
 
 # ── Supabase Authentication ───────────────────────────────────────────────────
 
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from fastapi import Header, HTTPException, status
-from app.core.security import AuthenticatedUser, decode_supabase_token
-
 security_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_optional_current_user(
+    settings: Annotated[Settings, Depends(get_settings)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)] = None,
     authorization: Annotated[str | None, Header()] = None,
     x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
@@ -354,15 +354,24 @@ async def get_optional_current_user(
         token = authorization.split(" ", 1)[1]
 
     if token:
-        user = decode_supabase_token(token)
-        if user:
-            return user
+        # Never downgrade an invalid bearer token to a guest identity.
+        return decode_supabase_token(
+            token,
+            secret=settings.supabase_jwt_secret,
+            issuer=settings.supabase_jwt_issuer,
+            audience=settings.supabase_jwt_audience,
+        )
 
     # Fallback to client session header for isolated practice sessions
     client_id = x_user_id or x_candidate_id
-    if client_id and len(client_id.strip()) > 3:
+    if settings.allow_guest_sessions and client_id and len(client_id.strip()) > 3:
+        import re
+
+        normalized_client_id = client_id.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{3,119}", normalized_client_id):
+            return None
         return AuthenticatedUser(
-            id=client_id.strip(),
+            id=normalized_client_id,
             email=None,
             role="guest",
             metadata={},

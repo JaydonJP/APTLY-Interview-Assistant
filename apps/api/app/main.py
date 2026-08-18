@@ -28,10 +28,12 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import app.models
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.router import router as v1_router
 from app.config import get_settings
@@ -78,13 +80,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # an unrelated SQLite database.
     from app.dependencies import get_async_engine
     from app.models.base import Base
-    # Import the model package so every declarative table, including the
-    # multimodal telemetry table, is registered before create_all().
-    import app.models  # noqa: F401
-
     async def _init_db() -> None:
-        engine = get_async_engine(settings.database_url)
-        attempts = 5 if settings.database_url.startswith("postgresql") else 1
+        database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+        engine = get_async_engine(database_url)
+        attempts = 5 if database_url.startswith("postgresql") else 1
         last_error: Exception | None = None
 
         def _sync_sqlite_schema(sync_conn: Any) -> None:

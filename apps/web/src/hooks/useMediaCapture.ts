@@ -20,8 +20,6 @@ export interface VisionFrameEvent {
   face_height: number;
   eye_contact: boolean;
   confidence: number;
-  expressionSignal?: VisionMetrics["expression_signal"];
-  expressionConfidence?: number;
 }
 
 export interface VisionMetrics {
@@ -36,8 +34,6 @@ export interface VisionMetrics {
   eye_contact_ratio: number | null;
   face_centering_score: number | null;
   tracking_confidence: number | null;
-  expression_signal: "neutral" | "engaged" | "strained" | "unavailable";
-  expression_confidence: number | null;
   face_presence_events: VisionFrameEvent[];
 }
 
@@ -90,10 +86,32 @@ const DEFAULT_CONSTRAINTS: MediaStreamConstraints = {
   },
 };
 
-// Typed helper for browser SpeechRecognition
+// Typed helpers for browser SpeechRecognition
+interface SpeechRecognitionResultLike {
+  0: { transcript: string };
+  length: number;
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: (() => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 interface IWindowWithSpeech extends Window {
-  SpeechRecognition?: any;
-  webkitSpeechRecognition?: any;
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
 }
 
 interface FaceBox {
@@ -103,8 +121,6 @@ interface FaceBox {
   height: number;
   confidence?: number;
   eyeContact?: boolean;
-  expressionSignal?: VisionMetrics["expression_signal"];
-  expressionConfidence?: number;
 }
 
 interface BrowserFaceDetector {
@@ -135,8 +151,6 @@ const EMPTY_VISION_METRICS: VisionMetrics = {
   eye_contact_ratio: null,
   face_centering_score: null,
   tracking_confidence: null,
-  expression_signal: "unavailable",
-  expression_confidence: null,
   face_presence_events: [],
 };
 
@@ -181,15 +195,17 @@ export function useMediaCapture({
   const silenceStartTimeRef = useRef<number>(0);
   const onSpeechStartRef = useRef(onSpeechStart);
   const onSpeechEndRef = useRef(onSpeechEnd);
-  onSpeechStartRef.current = onSpeechStart;
-  onSpeechEndRef.current = onSpeechEnd;
+  useEffect(() => {
+    onSpeechStartRef.current = onSpeechStart;
+    onSpeechEndRef.current = onSpeechEnd;
+  }, [onSpeechEnd, onSpeechStart]);
 
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptBufferRef = useRef<string>("");
 
   // Optional browser vision capability. FaceDetector supplies multi-face and
   // framing signals; an installed landmark adapter can additionally provide
-  // true eye-contact and expression observations through aptlyVisionProvider.
+  // observable head-orientation signals through aptlyVisionProvider.
   const visionVideoRef = useRef<HTMLVideoElement | null>(null);
   const visionDetectorRef = useRef<BrowserFaceDetector | null>(null);
   const visionProviderRef = useRef<IWindowWithVision["aptlyVisionProvider"]>(null);
@@ -232,11 +248,11 @@ export function useMediaCapture({
             },
             runningMode: "VIDEO",
             numFaces: 4,
-            outputFaceBlendshapes: true
+            outputFaceBlendshapes: false
           });
           const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
           const point = (landmarks, index) => landmarks[index] || { x: 0, y: 0, z: 0 };
-          const makeFace = (landmarks, blendshapeSet) => {
+          const makeFace = (landmarks) => {
             const xs = landmarks.map((item) => item.x);
             const ys = landmarks.map((item) => item.y);
             const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -249,23 +265,16 @@ export function useMediaCapture({
             const nose = point(landmarks, 1);
             const faceCenter = (minX + maxX) / 2;
             const facingCamera = eyeOffset < 0.9 && Math.abs(nose.x - faceCenter) < (maxX - minX) * 0.22;
-            const scores = Object.fromEntries((blendshapeSet || []).map((item) => [item.categoryName, item.score]));
-            const smile = ((scores.mouthSmileLeft || 0) + (scores.mouthSmileRight || 0)) / 2;
-            const browTension = ((scores.browDownLeft || 0) + (scores.browDownRight || 0)) / 2;
-            const jawOpen = scores.jawOpen || 0;
-            const expressionSignal = smile > 0.35 ? "engaged" : (browTension > 0.35 && jawOpen > 0.2 ? "strained" : "neutral");
-            const expressionConfidence = Math.min(0.8, Math.max(0.35, Math.max(smile, browTension, jawOpen)));
             return {
               x: minX, y: minY, width: maxX - minX, height: maxY - minY,
-              confidence: 0.9, eyeContact: facingCamera,
-              expressionSignal, expressionConfidence
+              confidence: 0.9, eyeContact: facingCamera
             };
           };
           window.__aptlySetVisionProvider({
             modelVersion: "MediaPipe Face Landmarker 0.10.22",
             detect: async (video) => {
               const result = landmarker.detectForVideo(video, performance.now());
-              return { faces: (result.faceLandmarks || []).map((landmarks, index) => makeFace(landmarks, result.faceBlendshapes?.[index]?.categories || [])) };
+              return { faces: (result.faceLandmarks || []).map((landmarks) => makeFace(landmarks)) };
             }
           });
         } catch (error) {
@@ -283,7 +292,6 @@ export function useMediaCapture({
     const validSamples = samples.filter((sample) => sample.face_count > 0);
     const faceSamples = samples.filter((sample) => sample.face_count > 0);
     const multiSamples = samples.filter((sample) => sample.face_count > 1);
-    const expressionSamples = samples.filter((sample) => sample.expressionSignal !== "unavailable");
     const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
     const ratio = (count: number) => (samples.length > 0 ? count / samples.length : null);
     const average = (values: number[]) => (values.length > 0 ? sum(values) / values.length : null);
@@ -308,10 +316,6 @@ export function useMediaCapture({
       eye_contact_ratio: samples.length > 0 ? sum(samples.map((sample) => (sample.eye_contact ? 1 : 0))) / samples.length : null,
       face_centering_score: average(validSamples.map((sample) => sample.face_x + sample.face_width / 2).map((center) => Math.max(0, 1 - Math.abs(0.5 - center) * 2))),
       tracking_confidence: average(validSamples.map((sample) => sample.confidence)),
-      expression_signal: expressionSamples.length > 0
-        ? expressionSamples.sort((a, b) => b.confidence - a.confidence)[0].expressionSignal ?? "unavailable"
-        : "unavailable",
-      expression_confidence: average(expressionSamples.map((sample) => sample.confidence)),
       face_presence_events: samples.slice(-2000),
     };
   }, []);
@@ -354,9 +358,7 @@ export function useMediaCapture({
         // camera-facing opportunity proxy. A landmark adapter can replace it.
         eye_contact: primaryFace?.eyeContact ?? centered,
         confidence: Math.max(0, Math.min(1, primaryFace?.confidence ?? 0)),
-        expressionSignal: primaryFace?.expressionSignal ?? "unavailable",
-        expressionConfidence: primaryFace?.expressionConfidence ?? 0,
-      } as VisionFrameEvent & { expressionSignal: VisionMetrics["expression_signal"] });
+      });
     } catch {
       // A camera frame can be unavailable during tab switches or device sleep.
     } finally {
@@ -697,7 +699,7 @@ export function useMediaCapture({
             recognition.interimResults = true;
             recognition.lang = "en-US";
 
-            recognition.onresult = (event: any) => {
+            recognition.onresult = (event: SpeechRecognitionEventLike) => {
               let fullText = "";
               for (let i = 0; i < event.results.length; i++) {
                 fullText += event.results[i][0].transcript + " ";

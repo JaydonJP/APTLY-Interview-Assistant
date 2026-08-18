@@ -8,7 +8,16 @@ import json
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import get_idempotency_key
@@ -40,6 +49,33 @@ from app.services.providers.base import LLMProvider, TranscriptionProvider
 from app.services.storage.base import StorageProvider
 
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
+
+
+def _ensure_interview_access(
+    interview: Any,
+    user: AuthenticatedUser | None,
+) -> None:
+    """Require the authenticated owner or the exact guest session identity."""
+    owner_id = getattr(interview, "user_id", None)
+    learner_id = getattr(interview, "learner_id", "anonymous")
+    if owner_id:
+        if not user or user.id != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "ACCESS_DENIED",
+                    "message": "You do not have permission to access this private interview session.",
+                },
+            )
+        return
+    if learner_id != "anonymous" and (not user or user.id != learner_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "This guest interview belongs to a different browser session.",
+            },
+        )
 
 
 def _get_interview_service(
@@ -129,14 +165,7 @@ async def get_interview(
         )
 
     # Privacy Check: Enforce user ownership if interview is user-bound
-    if detail.user_id and user and detail.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "ACCESS_DENIED",
-                "message": "You do not have permission to view this private interview session.",
-            },
-        )
+    _ensure_interview_access(detail, user)
 
     return _to_detail_response(detail)
 
@@ -150,10 +179,34 @@ async def get_interview(
 async def start_interview(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewDetailResponse:
     """Start the live interview."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
     interview = await service.start_interview(interview_id)
     return _to_detail_response(interview)
+
+
+@router.delete(
+    "/{interview_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an interview and its media",
+)
+async def delete_interview(
+    interview_id: UUID,
+    service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
+) -> Response:
+    """Permanently remove media and hide the interview metadata."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
+    await service.delete_interview(interview_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -167,8 +220,13 @@ async def create_answer(
     interview_id: UUID,
     payload: AnswerCreateRequest,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> AnswerResponse:
     """Create an answer record."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
     answer = await service.create_answer(interview_id, payload.question_id)
     return _to_answer_response(answer)
 
@@ -193,8 +251,14 @@ async def upload_answer_audio(
         str | None, Form(description="Optional privacy-safe browser vision telemetry JSON")
     ] = None,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> AnswerResponse:
     """Upload recorded audio/video and process transcript, speech, content, and vision metrics."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
+
     from app.core.security import (
         ALLOWED_MEDIA_MIME_TYPES,
         MAX_UPLOAD_SIZE_BYTES,
@@ -263,8 +327,13 @@ async def upload_answer_audio(
 async def next_question(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewDetailResponse:
     """Advance to the next question."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
     interview = await service.advance_question(interview_id)
     return _to_detail_response(interview)
 
@@ -278,8 +347,13 @@ async def next_question(
 async def finish_interview(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewDetailResponse:
     """Finish the interview."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
     interview = await service.finish_interview(interview_id)
     return _to_detail_response(interview)
 
@@ -295,8 +369,13 @@ async def explain_question(
     question_id: UUID,
     payload: QuestionExplanationRequest,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> QuestionExplanationResponse:
     """Let the candidate ask for clarification during a realistic interview."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail={"code": "INTERVIEW_NOT_FOUND", "message": "Interview not found."})
+    _ensure_interview_access(detail, user)
     explanation = await service.explain_question(
         interview_id=interview_id,
         question_id=question_id,
@@ -327,14 +406,7 @@ async def get_interview_review(
             },
         )
 
-    if detail.user_id and user and detail.user_id != user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "ACCESS_DENIED",
-                "message": "You do not have permission to view this private review report.",
-            },
-        )
+    _ensure_interview_access(detail, user)
 
     review = await service.compile_review(interview_id)
     return InterviewReviewResponse(**review)
@@ -498,8 +570,6 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             face_centering_score=vm.face_centering_score,
             tracking_confidence=vm.tracking_confidence,
             visual_communication_score=vm.visual_communication_score,
-            expression_signal=vm.expression_signal,
-            expression_confidence=vm.expression_confidence,
             face_presence_events=vm.face_presence_events_json,
             strengths=vm.strengths_json,
             improvements=vm.improvements_json,
