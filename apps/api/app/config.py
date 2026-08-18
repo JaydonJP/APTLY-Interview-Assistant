@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     report_llm_provider: Literal["mock", "gemini"] = "mock"
     gemini_api_key: str = Field(default="", description="Google Gemini API key")
     llm_api_key: str = ""
-    llm_model: str = "gemini-2.5-flash"
+    llm_model: str = "gemini-3.6-flash"
     llm_timeout_seconds: float = 30.0
     llm_temperature: float = 0.1
 

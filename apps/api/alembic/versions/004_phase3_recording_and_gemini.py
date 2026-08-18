@@ -19,8 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Update questions table
-    op.add_column("questions", sa.Column("parent_question_id", sa.String(length=36), nullable=True))
-    op.add_column("questions", sa.Column("root_question_id", sa.String(length=36), nullable=True))
+    op.add_column("questions", sa.Column("parent_question_id", sa.Uuid(), nullable=True))
+    op.add_column("questions", sa.Column("root_question_id", sa.Uuid(), nullable=True))
     op.add_column("questions", sa.Column("question_source", sa.String(length=50), nullable=False, server_default="initial"))
     op.add_column("questions", sa.Column("follow_up_depth", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("questions", sa.Column("target_competency", sa.String(length=100), nullable=False, server_default=""))

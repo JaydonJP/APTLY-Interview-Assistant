@@ -1,6 +1,6 @@
 """Analysis verdicts, learner identity, and persistent knowledge graph.
 
-Revision ID: 005_analysis_progress_knowledge_graph
+Revision ID: 005_analysis_progress_kg
 Revises: 004_phase3_recording_and_gemini
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = "005_analysis_progress_knowledge_graph"
+revision: str = "005_analysis_progress_kg"
 down_revision: Union[str, None] = "004_phase3_recording_and_gemini"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -50,7 +50,7 @@ def upgrade() -> None:
 
     op.create_table(
         "knowledge_topics",
-        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("normalized_name", sa.String(length=180), nullable=False),
@@ -68,11 +68,11 @@ def upgrade() -> None:
 
     op.create_table(
         "knowledge_edges",
-        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.Column("source_topic_id", sa.String(length=36), nullable=False),
-        sa.Column("target_topic_id", sa.String(length=36), nullable=False),
+        sa.Column("source_topic_id", sa.Uuid(), nullable=False),
+        sa.Column("target_topic_id", sa.Uuid(), nullable=False),
         sa.Column("edge_type", sa.String(length=50), nullable=False, server_default="co_occurs"),
         sa.Column("weight", sa.Integer(), nullable=False, server_default="1"),
         sa.ForeignKeyConstraint(["source_topic_id"], ["knowledge_topics.id"], ondelete="CASCADE"),
@@ -86,18 +86,18 @@ def upgrade() -> None:
 
     op.create_table(
         "learner_topic_progress",
-        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("learner_id", sa.String(length=120), nullable=False),
-        sa.Column("topic_id", sa.String(length=36), nullable=False),
+        sa.Column("topic_id", sa.Uuid(), nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("correct_attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("average_score", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("mastery_score", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("last_score", sa.Float(), nullable=False, server_default="0.0"),
-        sa.Column("last_interview_id", sa.String(length=36), nullable=True),
-        sa.Column("last_answer_id", sa.String(length=36), nullable=True),
+        sa.Column("last_interview_id", sa.Uuid(), nullable=True),
+        sa.Column("last_answer_id", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(["topic_id"], ["knowledge_topics.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["last_interview_id"], ["interviews.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["last_answer_id"], ["answers.id"], ondelete="SET NULL"),

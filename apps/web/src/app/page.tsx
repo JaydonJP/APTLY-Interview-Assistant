@@ -2,131 +2,215 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   ArrowRight,
-  BadgeCheck,
-  BarChart3,
-  Eye,
-  Mic2,
+  Check,
+  ChevronRight,
   Play,
   ShieldCheck,
-  Sparkles,
-  Waves,
 } from "lucide-react";
-
+import { BrandMark } from "@/components/layout/BrandMark";
 import { UserMenu } from "@/components/auth/UserMenu";
 
 export const metadata: Metadata = {
-  title: "APTLY — Evidence-backed AI interview coaching",
+  title: "APTLY - Evidence-backed AI interview coaching",
+  description:
+    "Practice real interviews, inspect timestamped evidence, and repair weak answers immediately.",
 };
 
-const PROOF_POINTS = [
+const EXPERIENCES = [
   {
-    icon: Sparkles,
-    title: "Adaptive questions",
-    description: "Follow-ups react to what you actually said, including vague claims that deserve proof.",
+    number: "01",
+    title: "Role intelligence",
+    copy: "Turn any job description into the competencies, technical themes, and behavioral evidence the interview will test.",
   },
   {
-    icon: Eye,
-    title: "Replayable evidence",
-    description: "Timestamped fillers, pauses, transcript spans, and content notes stay tied to the recording.",
+    number: "02",
+    title: "Interview room",
+    copy: "A distraction-free interview where the intelligence lives in the follow-up questions, not a wall of live analytics.",
   },
   {
-    icon: BarChart3,
-    title: "A better next rep",
-    description: "Leave with one focused drill and a clear retry target instead of a wall of generic advice.",
+    number: "03",
+    title: "Evidence room",
+    copy: "Replay the exact timestamp, transcript span, pause, filler, claim, or delivery signal behind every important insight.",
+  },
+  {
+    number: "04",
+    title: "Repair mode",
+    copy: "Retry a weak answer immediately and compare only the changes APTLY can reliably support.",
   },
 ];
 
 export default function HomePage() {
   return (
-    <main className="relative min-h-screen overflow-hidden">
-      <div className="grid-noise pointer-events-none absolute inset-x-0 top-0 h-[42rem] opacity-60" />
-
-      <header className="relative mx-auto flex w-full max-w-[82rem] items-center justify-between px-4 py-6 sm:px-6 lg:px-8">
-        <Link href="/" className="flex items-center gap-3" aria-label="APTLY home">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-300/30 bg-violet-400/15 text-sm font-bold text-violet-100">A</span>
-          <span className="text-sm font-semibold tracking-[0.22em] text-white">APTLY</span>
-        </Link>
-        <div className="hidden items-center gap-5 text-sm text-slate-400 md:flex">
-          <span>Evidence-backed coaching</span>
-          <span className="h-1 w-1 rounded-full bg-emerald-300" />
-          <span>Browser-first privacy</span>
-        </div>
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard" className="text-sm font-medium text-slate-300 transition hover:text-white hidden sm:inline">Workspace</Link>
+    <main className="min-h-screen overflow-hidden bg-[#08090b]">
+      <header className="mx-auto flex h-[4.75rem] w-[min(100%-2rem,78rem)] items-center justify-between">
+        <BrandMark href="/" />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="hidden text-xs font-medium text-zinc-500 transition hover:text-zinc-200 sm:block"
+          >
+            Practice
+          </Link>
           <UserMenu />
         </div>
       </header>
 
-      <section className="relative mx-auto grid max-w-[82rem] items-center gap-14 px-4 pb-20 pt-12 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8 lg:pb-28 lg:pt-20">
-        <div>
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1.5 text-xs font-medium text-emerald-200">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_0.7rem_rgba(69,211,154,0.8)]" />
-            Built for the interview after the interview
-          </div>
-          <h1 className="max-w-3xl text-5xl font-semibold leading-[1.03] tracking-[-0.05em] text-white sm:text-7xl">
-            Interview better.
-            <span className="gradient-text block">Prove it.</span>
+      <section className="relative mx-auto grid min-h-[calc(100svh-4.75rem)] w-[min(100%-2rem,78rem)] items-center gap-14 py-16 lg:grid-cols-[0.92fr_1.08fr] lg:py-20">
+        <div className="relative z-10">
+          <p className="eyebrow">Evidence-backed interview coaching</p>
+          <h1 className="mt-6 max-w-3xl text-balance text-5xl font-medium leading-[0.98] tracking-[-0.055em] text-stone-100 sm:text-7xl">
+            The interview coach that asks for proof.
           </h1>
-          <p className="mt-7 max-w-xl text-lg leading-8 text-slate-400">
-            Aptly conducts a role-aware voice interview, measures how you deliver the answer, and takes you back to the moments worth fixing.
+          <p className="mt-7 max-w-xl text-base leading-7 text-zinc-400">
+            APTLY challenges vague answers, connects feedback to the recording,
+            and helps you repair the weak moment before it becomes a habit.
           </p>
           <div className="mt-9 flex flex-wrap items-center gap-3">
-            <Link id="cta-get-started" href="/dashboard" className="group inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100">
-              Start a mock interview
-              <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+            <Link
+              href="/interview/new"
+              className="group inline-flex min-h-12 items-center gap-2 rounded-xl bg-stone-100 px-5 text-sm font-semibold text-zinc-950 transition hover:bg-white"
+            >
+              Start an interview
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Link>
-            <a href="#how-it-works" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3.5 text-sm font-medium text-slate-200 transition hover:bg-white/10">
-              <Play className="h-4 w-4 text-cyan-200" />
-              See the loop
+            <a
+              href="#product"
+              className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-white/[0.09] px-5 text-sm font-medium text-zinc-400 transition hover:border-white/[0.16] hover:text-zinc-200"
+            >
+              See the product
+              <ChevronRight className="h-4 w-4" />
             </a>
           </div>
-          <div className="mt-9 flex flex-wrap items-center gap-x-5 gap-y-3 text-xs text-slate-500">
-            <span className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-300" /> No face identification</span>
-            <span className="inline-flex items-center gap-2"><Mic2 className="h-4 w-4 text-violet-300" /> Audio + camera capture</span>
+          <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-[0.68rem] text-zinc-600">
+            <span className="inline-flex items-center gap-1.5">
+              <Check className="h-3 w-3 text-emerald-300" />
+              Feedback linked to evidence
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <ShieldCheck className="h-3 w-3 text-emerald-300" />
+              No face identification
+            </span>
           </div>
         </div>
 
         <div className="relative">
-          <div className="absolute -inset-8 rounded-[2.5rem] bg-violet-400/10 blur-3xl" />
-          <div className="relative rounded-[1.75rem] border border-white/10 bg-[#0d1118]/90 p-3 shadow-[0_2rem_7rem_rgba(0,0,0,0.45)]">
-            <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/[0.035] px-4 py-3">
-              <div className="flex items-center gap-3"><span className="h-2 w-2 rounded-full bg-emerald-300" /><span className="text-xs font-medium text-slate-200">Interview evidence</span></div>
-              <span className="font-mono text-[11px] text-slate-500">SESSION 04 / REVIEW</span>
-            </div>
-            <div className="grid gap-3 p-2 pt-3 sm:grid-cols-[1.05fr_0.95fr]">
-              <div className="rounded-xl border border-white/8 bg-[#161d28] p-4">
-                <div className="flex items-center justify-between text-[11px] text-slate-500"><span>Q3 · Follow-up</span><span className="font-mono">04:18</span></div>
-                <p className="mt-7 text-base leading-7 text-slate-200">“What metric improved, and how did you validate the result?”</p>
-                <div className="mt-10 flex h-16 items-end gap-1.5 border-b border-white/8 pb-2">
-                  {[18, 25, 22, 42, 36, 54, 44, 30, 48, 62, 46, 70, 50, 34, 44, 58, 38, 28, 48, 60].map((height, index) => <span key={index} className={`w-full rounded-t-sm ${index > 13 ? "bg-cyan-300/70" : "bg-violet-300/45"}`} style={{ height: `${height}%` }} />)}
-                </div>
-                <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500"><span>00:00</span><span>Answer waveform</span><span>01:42</span></div>
+          <div className="pointer-events-none absolute -inset-20 rounded-full bg-violet-400/[0.08] blur-3xl" />
+          <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.09] bg-[#0d0f13] p-3 shadow-[0_3rem_8rem_rgba(0,0,0,0.42)]">
+            <div className="rounded-[1.35rem] border border-white/[0.065] bg-black p-4 sm:p-5">
+              <div className="flex items-center justify-between text-[0.65rem] text-zinc-600">
+                <span>Evidence Room / Turn 03</span>
+                <span className="font-mono tabular-nums">04:18</span>
               </div>
-              <div className="space-y-3">
-                <div className="rounded-xl border border-amber-300/15 bg-amber-300/7 p-4">
-                  <div className="flex items-center justify-between"><span className="text-xs font-semibold text-amber-200">Coaching moment</span><span className="font-mono text-[11px] text-amber-200/60">04:18</span></div>
-                  <p className="mt-3 text-sm leading-6 text-slate-300">Unsupported result claim. Add a baseline and validation method.</p>
-                  <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full w-[68%] rounded-full bg-amber-300" /></div>
-                </div>
-                <div className="rounded-xl border border-white/8 bg-[#161d28] p-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-200"><BadgeCheck className="h-4 w-4 text-emerald-300" /> Evidence linked</div>
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-center"><div className="rounded-lg bg-white/[0.04] p-3"><p className="font-mono text-lg text-white">142</p><p className="mt-1 text-[10px] text-slate-500">WPM</p></div><div className="rounded-lg bg-white/[0.04] p-3"><p className="font-mono text-lg text-white">02</p><p className="mt-1 text-[10px] text-slate-500">Fillers</p></div></div>
+              <div className="mt-4 aspect-video overflow-hidden rounded-xl border border-white/[0.07] bg-gradient-to-b from-[#171a20] to-[#090a0c]">
+                <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full border border-white/[0.12] bg-white/[0.04] text-zinc-300">
+                    <Play className="ml-0.5 h-4 w-4 fill-current" />
+                  </span>
+                  <p className="mt-5 max-w-md text-sm leading-6 text-zinc-300">
+                    &ldquo;We improved model accuracy by 30% after rebuilding the
+                    evaluation pipeline.&rdquo;
+                  </p>
                 </div>
               </div>
+              <div className="mt-5">
+                <div className="relative h-10">
+                  <span className="absolute inset-x-0 top-5 h-px bg-white/[0.09]" />
+                  {[
+                    ["18%", "bg-amber-300", "h-4"],
+                    ["39%", "bg-violet-300", "h-6"],
+                    ["63%", "bg-blue-300", "h-5"],
+                    ["78%", "bg-emerald-300", "h-7"],
+                  ].map(([left, color, height]) => (
+                    <span
+                      key={left}
+                      className={`absolute top-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${color} ${height}`}
+                      style={{ left }}
+                    />
+                  ))}
+                </div>
+                <div className="flex justify-between font-mono text-[0.6rem] text-zinc-700">
+                  <span>00:00</span>
+                  <span>01:24</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-3 rounded-xl border border-cyan-300/15 bg-cyan-300/6 px-4 py-3 text-xs text-cyan-100"><Waves className="h-4 w-4" /><span>Challenge → Prove → Repair</span><span className="ml-auto text-cyan-200/50">01</span></div>
+
+            <div className="grid gap-2 p-2 pt-3 sm:grid-cols-3">
+              {[
+                ["Challenge", "Which metric changed?"],
+                ["Prove", "Baseline not stated"],
+                ["Repair", "Retry with validation"],
+              ].map(([title, copy], index) => (
+                <div
+                  key={title}
+                  className={`rounded-xl border p-3 ${
+                    index === 2
+                      ? "border-violet-300/16 bg-violet-300/[0.05]"
+                      : "border-white/[0.06] bg-white/[0.018]"
+                  }`}
+                >
+                  <p className="text-[0.68rem] font-medium text-zinc-300">
+                    {title}
+                  </p>
+                  <p className="mt-1 text-[0.62rem] text-zinc-700">{copy}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="how-it-works" className="relative border-y border-white/8 bg-white/[0.02]">
-        <div className="mx-auto grid max-w-[82rem] gap-8 px-4 py-16 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
-          <div><p className="eyebrow">The Aptly loop</p><h2 className="mt-4 max-w-md text-3xl font-semibold tracking-tight text-white">Every score has proof. Every weakness gets an action.</h2></div>
-          <div className="grid gap-4 sm:grid-cols-3">{PROOF_POINTS.map(({ icon: Icon, title, description }) => <div key={title} className="rounded-2xl border border-white/8 bg-[#0d1118] p-5"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-300/10 text-violet-200"><Icon className="h-5 w-5" /></div><h3 className="mt-5 text-sm font-semibold text-white">{title}</h3><p className="mt-2 text-sm leading-6 text-slate-500">{description}</p></div>)}</div>
+      <section
+        id="product"
+        className="border-y border-white/[0.065] bg-[#0b0c0f]"
+      >
+        <div className="mx-auto w-[min(100%-2rem,78rem)] py-20 sm:py-28">
+          <div className="grid gap-10 lg:grid-cols-[0.65fr_1.35fr]">
+            <div>
+              <p className="eyebrow">The product</p>
+              <h2 className="mt-4 max-w-sm text-3xl font-medium tracking-[-0.04em] text-stone-100 sm:text-4xl">
+                Four experiences. One deliberate practice loop.
+              </h2>
+            </div>
+            <div className="divide-y divide-white/[0.07] border-y border-white/[0.07]">
+              {EXPERIENCES.map((item) => (
+                <div
+                  key={item.number}
+                  className="grid gap-3 py-6 sm:grid-cols-[3rem_12rem_1fr] sm:items-start"
+                >
+                  <span className="font-mono text-xs text-zinc-700">
+                    {item.number}
+                  </span>
+                  <h3 className="text-sm font-medium text-zinc-200">
+                    {item.title}
+                  </h3>
+                  <p className="text-sm leading-6 text-zinc-500">{item.copy}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
-      <footer className="mx-auto flex max-w-[82rem] flex-col gap-3 px-4 py-8 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8"><span>APTLY · evidence-backed AI interview coaching</span><span>Privacy is a product feature, not a footnote.</span></footer>
+      <section className="mx-auto w-[min(100%-2rem,78rem)] py-20 text-center sm:py-28">
+        <p className="eyebrow">Your next rep</p>
+        <h2 className="mx-auto mt-5 max-w-2xl text-balance text-4xl font-medium tracking-[-0.045em] text-stone-100 sm:text-5xl">
+          Stop collecting advice. Repair the answer.
+        </h2>
+        <Link
+          href="/interview/new"
+          className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-xl bg-stone-100 px-5 text-sm font-semibold text-zinc-950 hover:bg-white"
+        >
+          Build your role profile <ArrowRight className="h-4 w-4" />
+        </Link>
+      </section>
+
+      <footer className="border-t border-white/[0.065]">
+        <div className="mx-auto flex w-[min(100%-2rem,78rem)] flex-col gap-3 py-7 text-[0.68rem] text-zinc-700 sm:flex-row sm:items-center sm:justify-between">
+          <span>APTLY / Evidence-backed interview coaching</span>
+          <span>Challenge. Prove. Repair.</span>
+        </div>
+      </footer>
     </main>
   );
 }

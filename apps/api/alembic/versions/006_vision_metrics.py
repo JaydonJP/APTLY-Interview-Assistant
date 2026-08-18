@@ -8,7 +8,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "006_vision_metrics"
-down_revision: str | None = "005_analysis_progress_knowledge_graph"
+down_revision: str | None = "005_analysis_progress_kg"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -20,10 +20,10 @@ def _json_column() -> sa.types.TypeEngine:
 def upgrade() -> None:
     op.create_table(
         "vision_metrics",
-        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.Column("answer_id", sa.String(length=36), nullable=False),
+        sa.Column("answer_id", sa.Uuid(), nullable=False),
         sa.Column("provider", sa.String(length=50), nullable=False, server_default="browser"),
         sa.Column("model_version", sa.String(length=100), nullable=False, server_default="unavailable"),
         sa.Column("capability_status", sa.String(length=50), nullable=False, server_default="unavailable"),

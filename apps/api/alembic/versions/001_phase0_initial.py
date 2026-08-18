@@ -34,7 +34,6 @@ def upgrade() -> None:
             sa.String(50),
             nullable=False,
             server_default="created",
-            index=True,
         ),
         sa.Column(
             "metrics_schema_version",

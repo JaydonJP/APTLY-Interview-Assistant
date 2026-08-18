@@ -21,11 +21,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "content_metrics",
-        sa.Column("id", sa.String(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("answer_id", sa.String(length=36), nullable=False),
+        sa.Column("answer_id", sa.Uuid(), nullable=False),
         sa.Column("question_type", sa.String(length=50), nullable=False, server_default="technical"),
         sa.Column("relevance_score", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("technical_depth_score", sa.Float(), nullable=False, server_default="0.0"),

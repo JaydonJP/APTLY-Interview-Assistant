@@ -669,7 +669,7 @@ class InterviewService:
                 answer_id=answer.id,
                 result=content_result,
                 provider=getattr(self.llm_provider, "PROVIDER_NAME", "gemini"),
-                model=getattr(self.llm_provider, "MODEL_NAME", "gemini-2.5-flash"),
+                model=getattr(self.llm_provider, "MODEL_NAME", "gemini-3.6-flash"),
             )
             if question and interview:
                 # Update the durable topic graph immediately after evaluation.

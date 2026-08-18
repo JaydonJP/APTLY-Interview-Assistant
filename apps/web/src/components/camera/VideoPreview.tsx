@@ -10,6 +10,7 @@ interface VideoPreviewProps {
   isCameraReady: boolean;
   isMicReady: boolean;
   className?: string;
+  minimal?: boolean;
 }
 
 export function VideoPreview({
@@ -19,6 +20,7 @@ export function VideoPreview({
   isCameraReady,
   isMicReady,
   className = "",
+  minimal = false,
 }: VideoPreviewProps) {
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
   const recordedVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -40,8 +42,14 @@ export function VideoPreview({
 
   return (
     <div
-      className={`relative w-full h-full min-h-[360px] overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950 shadow-2xl backdrop-blur-xl flex items-center justify-center ${
-        isRecording ? "border-red-500/60 shadow-[0_0_30px_rgba(239,68,68,0.25)]" : ""
+      className={`relative flex h-full w-full items-center justify-center overflow-hidden border bg-[#090a0c] ${
+        minimal
+          ? "min-h-0 rounded-[1.6rem] border-white/[0.08]"
+          : "min-h-[360px] rounded-2xl border-slate-800/80 shadow-2xl backdrop-blur-xl"
+      } ${
+        isRecording && !minimal
+          ? "border-red-500/60 shadow-[0_0_30px_rgba(239,68,68,0.25)]"
+          : ""
       } ${className}`}
     >
       {/* Live Webcam Feed */}
@@ -95,7 +103,7 @@ export function VideoPreview({
       )}
 
       {/* Top HUD Badges */}
-      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-30">
+      {!minimal && <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-30">
         <div className="flex items-center gap-2">
           <div
             className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-mono font-medium backdrop-blur-md shadow-sm ${
@@ -126,17 +134,17 @@ export function VideoPreview({
             <span>REC 720p</span>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Bottom HUD Mode Label */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono text-slate-400 pointer-events-none z-30">
+      {!minimal && <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-mono text-slate-400 pointer-events-none z-30">
         <span className="bg-slate-950/85 px-2.5 py-1 rounded-md border border-slate-800 backdrop-blur-md">
           {recordedUrl ? "RECORDED PLAYBACK" : "LIVE CAMERA FEED"}
         </span>
         <span className="bg-slate-950/85 px-2.5 py-1 rounded-md border border-slate-800 backdrop-blur-md">
           Capture preview
         </span>
-      </div>
+      </div>}
     </div>
   );
 }

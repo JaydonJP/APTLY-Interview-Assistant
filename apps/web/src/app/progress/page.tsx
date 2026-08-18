@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/AppShell";
-import { ProgressDashboard } from "@/components/progress/ProgressDashboard";
+import { ProgressOverview } from "@/components/progress/ProgressOverview";
 
 export const metadata: Metadata = {
-  title: "Longitudinal Progress & Analytics Lab | APTLY",
-  description: "Track your longitudinal interview mastery trajectory, empirical speech metrics, and STAR evidence growth.",
+  title: "Progress",
+  description: "Track measured delivery signals and evaluated answer quality over time.",
 };
 
 export default function ProgressPage() {
   return (
     <AppShell>
-      <ProgressDashboard />
+      <ProgressOverview />
     </AppShell>
   );
 }
