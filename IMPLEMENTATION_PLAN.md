@@ -41,7 +41,7 @@ Status: complete.
 - Remove generated package-manager and clone artifacts from the working tree.
 - Commit the finished build and push it to the requested GitHub repository.
 
-Status: in progress until push succeeds.
+Status: complete.
 
 ## Deliberate measurement boundary
 
