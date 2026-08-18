@@ -53,6 +53,7 @@ class Question(UUIDMixin, TimestampMixin, Base):
     question_source: Mapped[str] = mapped_column(String(50), nullable=False, default="initial")
     follow_up_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     target_competency: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    interviewer_persona: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
 
     # Relationships
     interview: Mapped[Interview] = relationship(

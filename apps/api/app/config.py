@@ -7,9 +7,6 @@ In Phase 0, mock providers allow the app to start without any AI credentials.
 Usage:
     from app.config import get_settings
     settings = get_settings()
-
-AI providers may use mocks in tests, but runtime database and media storage
-connections are intentionally explicit and are not replaced with local files.
 """
 
 from __future__ import annotations
@@ -25,9 +22,8 @@ class Settings(BaseSettings):
     """
     Typed application configuration loaded from environment variables.
 
-    Runtime infrastructure is explicit: database and remote-storage values
-    must be supplied through environment variables. Never put real secrets
-    here — use .env or a deployment secret manager.
+    All fields have safe defaults for local development.
+    Never put real secrets here — use .env or secrets management.
     """
 
     model_config = SettingsConfigDict(
@@ -62,20 +58,16 @@ class Settings(BaseSettings):
 
     # ── Database ───────────────────────────────────────────────
     database_url: str = Field(
-        default="",
-        description="Supabase PostgreSQL async connection URL",
+        default="postgresql+asyncpg://aptly:aptly_dev_password@localhost:5432/aptly_dev"
     )
 
     # ── Redis ──────────────────────────────────────────────────
-    redis_url: str = Field(default="")
+    redis_url: str = Field(default="redis://localhost:6379/0")
 
     # ── Storage ────────────────────────────────────────────────
-    # Interview recordings are private candidate data. Supabase Storage is the
-    # only supported runtime provider; local storage remains available only in
-    # isolated unit tests through dependency overrides.
-    storage_provider: Literal["local", "s3", "supabase", "r2"] = "supabase"
+    storage_provider: Literal["local", "s3", "supabase", "r2"] = "local"
     storage_bucket: str = "aptly-media"
-    storage_endpoint: str = ""
+    storage_endpoint: str = "./storage"
     storage_access_key: str = ""
     storage_secret_key: str = ""
 
@@ -93,24 +85,30 @@ class Settings(BaseSettings):
         description="Supabase anonymous key for public client operations",
     )
 
-    # ── LLM Provider (Google Gemini Pure Engine) ──────────────
-    llm_provider: Literal["mock", "gemini"] = "mock"
+    # ── LLM Providers (Gemini / Ollama Qwen / Mock) ───────────
+    llm_provider: Literal["mock", "gemini", "qwen", "ollama"] = "mock"
+    interview_llm_provider: Literal["mock", "gemini", "qwen", "ollama"] = "mock"
+    report_llm_provider: Literal["mock", "gemini"] = "mock"
     gemini_api_key: str = Field(default="", description="Google Gemini API key")
     llm_api_key: str = ""
     llm_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = 30.0
     llm_temperature: float = 0.1
 
-    # ── TTS Provider ──────────────────────────────────────────
-    tts_provider: Literal["mock", "gemini", "elevenlabs"] = "mock"
-    tts_api_key: str = ""
-    tts_model: str = "gemini-3.1-flash-tts-preview"
-    tts_voice: str = "Kore"
-    tts_timeout_seconds: float = 30.0
-    tts_style: str = (
-        "Warm, natural, curious professional interviewer. Use varied pacing, "
-        "short conversational pauses, clear articulation, and a friendly vocal smile."
+    # ── Ollama Local Qwen GGUF Model ──────────────────────────
+    ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama API base URL")
+    ollama_model: str = Field(
+        default="hf.co/mradermacher/interview-assistant-model-GGUF:Q4_K_M",
+        description="Local GGUF interview model identifier in Ollama",
     )
+
+    # ── TTS Provider (ElevenLabs Streaming Voice Engine) ──────
+    tts_provider: Literal["mock", "elevenlabs"] = "mock"
+    tts_api_key: str = ""
+    elevenlabs_api_key: str = Field(default="", description="ElevenLabs API key (server-side only)")
+    elevenlabs_model_id: str = Field(default="eleven_flash_v2_5", description="ElevenLabs low-latency voice model")
+    elevenlabs_hr_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="Voice ID for Sarah Chen (HR Lead)")
+    elevenlabs_tech_lead_voice_id: str = Field(default="ErXwobaYiN019PkySvjV", description="Voice ID for Alex Rivera (Tech Lead)")
 
     # ── Transcription Provider ────────────────────────────────
     transcription_provider: Literal["mock", "whisper", "whisperx", "deepgram"] = "mock"
@@ -119,6 +117,24 @@ class Settings(BaseSettings):
     whisperx_device: str = "auto"
     whisperx_compute_type: str = "auto"
     whisperx_language: str = "en"
+
+    # ── Gemini Live Realtime Engine ───────────────────────────
+    feature_gemini_live_interview: bool = Field(
+        default=False,
+        description="Enable real-time Gemini Live WebSocket interview mode",
+    )
+    gemini_live_model: str = Field(
+        default="gemini-2.0-flash-exp",
+        description="Google Gemini Live model identifier",
+    )
+    gemini_live_language_code: str = Field(
+        default="en-US",
+        description="Default spoken language code for Gemini Live session",
+    )
+    gemini_live_token_ttl_seconds: int = Field(
+        default=600,
+        description="TTL for server-minted short-lived ephemeral client tokens",
+    )
 
     # ── Feature Flags ─────────────────────────────────────────
     feature_realtime_interview: bool = False

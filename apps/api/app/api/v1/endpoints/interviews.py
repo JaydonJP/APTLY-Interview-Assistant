@@ -7,50 +7,32 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    File,
-    Form,
-    HTTPException,
-    Response,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.idempotency import get_idempotency_key
+from app.core.security import AuthenticatedUser
 from app.dependencies import (
     get_db,
     get_llm_provider,
+    get_optional_current_user,
     get_storage,
     get_transcription_provider,
-    get_tts_provider,
 )
-from app.models.interview import Interview
-from app.models.question import Question
 from app.schemas.interviews import (
     AnswerCreateRequest,
     AnswerResponse,
     ContentMetricsResponse,
-    DoubtRequest,
-    DoubtResponse,
     InterviewCreateRequest,
     InterviewDetailResponse,
     InterviewReviewResponse,
-    NarrationRequest,
     QuestionResponse,
     SpeechMetricsResponse,
     TranscriptResponse,
 )
+from app.schemas.panel import get_persona_profile
 from app.services.interview_service import InterviewService
-from app.services.providers.base import (
-    LLMGenerateRequest,
-    LLMProvider,
-    TranscriptionProvider,
-    TTSProvider,
-    TTSSynthesisRequest,
-)
+from app.services.providers.base import LLMProvider, TranscriptionProvider
 from app.services.storage.base import StorageProvider
 
 router = APIRouter(prefix="/interviews", tags=["Interviews"])
@@ -70,6 +52,22 @@ def _get_interview_service(
     )
 
 
+@router.get(
+    "",
+    response_model=list[InterviewDetailResponse],
+    summary="List interviews",
+    description="Lists interviews created by the current user (or public practice sessions).",
+)
+async def list_interviews(
+    service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
+) -> list[InterviewDetailResponse]:
+    """Retrieve list of interviews for the authenticated user."""
+    user_id = user.id if user else None
+    interviews = await service.list_interviews(user_id=user_id)
+    return [_to_detail_response(inv) for inv in interviews]
+
+
 @router.post(
     "",
     response_model=InterviewDetailResponse,
@@ -80,9 +78,11 @@ def _get_interview_service(
 async def create_interview(
     payload: InterviewCreateRequest,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
     idempotency_key: UUID | None = Depends(get_idempotency_key),
 ) -> InterviewDetailResponse:
     """Create a new practice interview session."""
+    user_id = user.id if user else None
     interview = await service.create_interview(
         title=payload.title,
         interview_type=payload.interview_type,
@@ -91,7 +91,8 @@ async def create_interview(
         question_count=payload.question_count,
         job_id=payload.job_id,
         role_profile_id=payload.role_profile_id,
-        learner_id=payload.learner_id,
+        user_id=user_id,
+        is_panel_mode=payload.is_panel_mode,
     )
 
     detail = await service.get_interview_detail(interview.id)
@@ -110,6 +111,7 @@ async def create_interview(
 async def get_interview(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewDetailResponse:
     """Retrieve full interview details."""
     detail = await service.get_interview_detail(interview_id)
@@ -121,6 +123,17 @@ async def get_interview(
                 "message": f"Interview '{interview_id}' not found.",
             },
         )
+
+    # Privacy Check: Enforce user ownership if interview is user-bound
+    if detail.user_id and user and detail.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "You do not have permission to view this private interview session.",
+            },
+        )
+
     return _to_detail_response(detail)
 
 
@@ -169,9 +182,29 @@ async def upload_answer_audio(
     duration_seconds: Annotated[
         float, Form(description="Total recorded duration in seconds")
     ] = 0.0,
+    transcript_text: Annotated[
+        str | None, Form(description="Optional live candidate speech transcript")
+    ] = None,
     service: InterviewService = Depends(_get_interview_service),
 ) -> AnswerResponse:
     """Upload recorded audio and process transcript/metrics."""
+    from app.core.security import (
+        ALLOWED_MEDIA_MIME_TYPES,
+        MAX_UPLOAD_SIZE_BYTES,
+        validate_media_mime_type,
+        validate_media_size,
+    )
+
+    content_type = (audio_file.content_type or "audio/webm").split(";")[0].strip().lower()
+    if not validate_media_mime_type(content_type):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "code": "INVALID_MEDIA_TYPE",
+                "message": f"Unsupported media type '{content_type}'. Allowed types: {sorted(ALLOWED_MEDIA_MIME_TYPES)}",
+            },
+        )
+
     audio_data = await audio_file.read()
     if len(audio_data) == 0:
         raise HTTPException(
@@ -182,13 +215,22 @@ async def upload_answer_audio(
             },
         )
 
-    content_type = audio_file.content_type or "audio/webm"
+    if not validate_media_size(len(audio_data)):
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail={
+                "code": "PAYLOAD_TOO_LARGE",
+                "message": f"Uploaded file exceeds maximum limit of {MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)}MB.",
+            },
+        )
+
     answer = await service.upload_and_process_answer(
         interview_id=interview_id,
         answer_id=answer_id,
         audio_data=audio_data,
         content_type=content_type,
         duration_seconds=duration_seconds,
+        transcript_text=transcript_text,
     )
     return _to_answer_response(answer)
 
@@ -232,82 +274,30 @@ async def finish_interview(
 async def get_interview_review(
     interview_id: UUID,
     service: InterviewService = Depends(_get_interview_service),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> InterviewReviewResponse:
     """Retrieve post-interview review data."""
+    detail = await service.get_interview_detail(interview_id)
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "INTERVIEW_NOT_FOUND",
+                "message": f"Interview '{interview_id}' not found.",
+            },
+        )
+
+    if detail.user_id and user and detail.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "You do not have permission to view this private review report.",
+            },
+        )
+
     review = await service.compile_review(interview_id)
     return InterviewReviewResponse(**review)
-
-
-@router.post(
-    "/{interview_id}/questions/{question_id}/explain",
-    response_model=DoubtResponse,
-    summary="Explain a question doubt",
-    description="Answers a candidate's question using the current role and interview context.",
-)
-async def explain_question_doubt(
-    interview_id: UUID,
-    question_id: UUID,
-    payload: DoubtRequest,
-    service: InterviewService = Depends(_get_interview_service),
-) -> DoubtResponse:
-    """Provide a grounded explanation without changing the interview state."""
-    question = await service.db.get(Question, question_id)
-    interview = await service.db.get(Interview, interview_id)
-    if not question or not interview or question.interview_id != interview_id:
-        raise HTTPException(status_code=404, detail="Question not found for this interview.")
-    role = interview.role_profile
-    prompt = (
-        f"The candidate is practicing for {role.role_title if role else interview.title}.\n"
-        f"Interview question: {question.question_text}\n"
-        f"Expected topics: {', '.join(question.expected_topics)}\n"
-        f"Candidate's doubt: {payload.doubt}\n"
-        f"Candidate's answer so far: {payload.candidate_answer or 'Not answered yet'}\n\n"
-        "Explain the concept in plain language, connect it to the interview question, "
-        "and give one compact example. Do not answer on behalf of the candidate or invent role requirements."
-    )
-    generated = await service.llm_provider.generate_text(
-        LLMGenerateRequest(
-            prompt=prompt,
-            system_prompt=(
-                "You are a patient senior interviewer. Explain doubts conversationally, "
-                "encourage the learner, and keep the answer technically accurate."
-            ),
-            temperature=0.25,
-            max_tokens=500,
-        )
-    )
-    return DoubtResponse(
-        answer=generated.text.strip(),
-        takeaway="Use the explanation to structure your own answer; the evaluator scores what you say.",
-        related_topics=question.expected_topics[:5],
-        provider=generated.provider,
-        model=generated.model,
-    )
-
-
-@router.post(
-    "/{interview_id}/narrate",
-    summary="Narrate interviewer text",
-    description="Returns expressive Gemini TTS audio; the API key stays server-side.",
-)
-async def narrate_text(
-    interview_id: UUID,
-    payload: NarrationRequest,
-    tts_provider: TTSProvider = Depends(get_tts_provider),
-) -> Response:
-    """Generate human-sounding interviewer narration."""
-    generated = await tts_provider.synthesize(
-        TTSSynthesisRequest(
-            text=payload.text,
-            voice_id=payload.voice_id or "Kore",
-            metadata={"interview_id": str(interview_id)},
-        )
-    )
-    return Response(
-        content=generated.audio_bytes,
-        media_type=generated.content_type,
-        headers={"Cache-Control": "private, max-age=300"},
-    )
 
 
 # ── Response Mappers ──────────────────────────────────────────────────────────
@@ -331,11 +321,16 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
             question_source=q.question_source,
             follow_up_depth=q.follow_up_depth,
             target_competency=q.target_competency,
+            interviewer_persona=getattr(q, "interviewer_persona", None),
+            persona_profile=get_persona_profile(getattr(q, "interviewer_persona", None)),
         )
-        for q in interview.questions
+        for q in getattr(interview, "questions", [])
     ]
 
     answers_res = [_to_answer_response(a) for a in getattr(interview, "answers", [])]
+    is_panel = getattr(interview, "interview_type", "").lower() == "panel" or any(
+        bool(getattr(q, "interviewer_persona", None)) for q in getattr(interview, "questions", [])
+    )
 
     return InterviewDetailResponse(
         id=interview.id,
@@ -345,7 +340,7 @@ def _to_detail_response(interview: Any) -> InterviewDetailResponse:
         difficulty_level=interview.difficulty_level,
         target_duration_minutes=interview.target_duration_minutes,
         current_question_index=interview.current_question_index,
-        learner_id=getattr(interview, "learner_id", "anonymous"),
+        is_panel_mode=is_panel,
         started_at=interview.started_at,
         completed_at=interview.completed_at,
         created_at=interview.created_at,
@@ -421,11 +416,6 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             structure_score=cm.structure_score,
             evidence_score=cm.evidence_score,
             overall_content_score=cm.overall_content_score,
-            correctness_status=cm.correctness_status,
-            correctness_score=cm.correctness_score,
-            correctness_summary=cm.correctness_summary,
-            topic_coverage=cm.topic_coverage_json,
-            ideal_answer_outline=cm.ideal_answer_outline_json,
             strengths=cm.strengths_json,
             weaknesses=cm.weaknesses_json,
             star_analysis=cm.star_analysis_json,

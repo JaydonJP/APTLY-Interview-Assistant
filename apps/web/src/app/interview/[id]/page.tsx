@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { VideoPreview } from "@/components/camera/VideoPreview";
@@ -8,29 +8,39 @@ import { AudioVisualizer } from "@/components/audio/AudioVisualizer";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { RecordingConsentModal } from "@/components/interview/RecordingConsentModal";
-import {
-  RecordingDiagnostics,
-  RecordingQualityPanel,
-} from "@/components/camera/RecordingQualityPanel";
+import { PanelInterviewerDeck } from "@/components/panel/PanelInterviewerDeck";
 import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
 import { apiClient } from "@/lib/api-client";
-import type { Answer, DoubtResponse, InterviewDetail, Question } from "@/types/interview";
+import type { Answer, InterviewDetail, Question } from "@/types/interview";
 import {
-  Video,
-  Square,
+  AlertTriangle,
+  ArrowRight,
+  Clock,
+  Cpu,
+  Mic,
+  Play,
+  Radio,
   RefreshCw,
   Send,
-  ArrowRight,
   Sparkles,
-  CheckCircle2,
-  Clock,
-  Radio,
-  AlertTriangle,
   Volume2,
-  Mic,
-  HelpCircle,
+  VolumeX,
 } from "lucide-react";
+
+type ConversationalState =
+  | "IDLE"
+  | "INTERVIEWER_SPEAKING"
+  | "LISTENING"
+  | "PROCESSING"
+  | "THINKING"
+  | "FOLLOWING_UP"
+  | "CHALLENGING"
+  | "RECOVERING"
+  | "ADVANCING"
+  | "ENDING";
+
+import { useGeminiLiveSession } from "@/hooks/useGeminiLiveSession";
 
 export default function LiveInterviewRoomPage() {
   const params = useParams<{ id: string }>();
@@ -44,43 +54,192 @@ export default function LiveInterviewRoomPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState<Answer | null>(null);
+  const [convState, setConvState] = useState<ConversationalState>("IDLE");
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [hasUserStarted, setHasUserStarted] = useState(false);
+
+  const spokenQuestionIdsRef = useRef<Set<string>>(new Set());
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Consent Modal State
   const [hasConsent, setHasConsent] = useState<boolean | null>(null);
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
 
-  // Question / Auto-Record Lifecycle State
-  const [isTtsPlaying, setIsTtsPlaying] = useState(false);
-  const [autoRecordCountdown, setAutoRecordCountdown] = useState<number | null>(null);
-  const [doubt, setDoubt] = useState("");
-  const [doubtAnswer, setDoubtAnswer] = useState<DoubtResponse | null>(null);
-  const [isExplaining, setIsExplaining] = useState(false);
-  const narrationRef = useRef<HTMLAudioElement | null>(null);
+  // Cancel interviewer speech (Barge-in Interruption)
+  const cancelInterviewerSpeech = useCallback(() => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current.src = "";
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
 
-  // Unified Media Capture Hook
+  // Web Speech Fallback helper
+  const speakWithWebSpeech = useCallback(
+    (text: string, persona?: string | null, onComplete?: () => void) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        if (onComplete) onComplete();
+        return;
+      }
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        const isHr = String(persona || "").toUpperCase().includes("HR");
+        utterance.pitch = isHr ? 1.12 : 0.94;
+        utterance.rate = 1.05;
+
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          const preferred = isHr
+            ? voices.find(
+                (v) =>
+                  v.name.includes("Female") ||
+                  v.name.includes("Samantha") ||
+                  v.name.includes("Zira") ||
+                  v.name.includes("Google UK English Female"),
+              )
+            : voices.find(
+                (v) =>
+                  v.name.includes("Male") ||
+                  v.name.includes("David") ||
+                  v.name.includes("Google US English"),
+              );
+          if (preferred) utterance.voice = preferred;
+        }
+
+        utterance.onend = () => {
+          if (onComplete) onComplete();
+        };
+        utterance.onerror = () => {
+          if (onComplete) onComplete();
+        };
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        if (onComplete) onComplete();
+      }
+    },
+    [],
+  );
+
+  // Primary Question Audio Playback (ElevenLabs with WebSpeech fallback)
+  const speakQuestionAudio = useCallback(
+    async (text: string, persona?: string | null, onComplete?: () => void) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          if (onComplete) onComplete();
+        }
+      };
+
+      try {
+        const isHr = String(persona || "").toUpperCase().includes("HR");
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            persona: isHr ? "friendly_hr" : "skeptical_tech_lead",
+          }),
+        });
+
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 200) {
+            const url = URL.createObjectURL(blob);
+            if (!audioPlayerRef.current) {
+              audioPlayerRef.current = new Audio();
+            }
+            const audio = audioPlayerRef.current;
+            audio.src = url;
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              finish();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              speakWithWebSpeech(text, persona, finish);
+            };
+            await audio.play();
+            return;
+          }
+        }
+      } catch {
+        // Fallback to browser WebSpeech on network/ElevenLabs error
+      }
+
+      speakWithWebSpeech(text, persona, finish);
+    },
+    [speakWithWebSpeech],
+  );
+
+  // Gemini Live Session Hook
+  const {
+    status: liveStatus,
+    isFallback,
+    fallbackReason,
+    partialInputTranscript,
+    partialOutputTranscript,
+    liveWpm,
+    isMuted,
+    toggleMute,
+    interruptInterviewer,
+  } = useGeminiLiveSession({
+    interviewId,
+    enabled: Boolean(interviewId),
+  });
+
+  // WebSocket hook for live session events & heartbeat
+  const { status: wsStatus, sendEvent } = useInterviewWebSocket({
+    interviewId,
+    enabled: Boolean(interviewId),
+  });
+
+  // Current Question helper
+  const currentQuestion: Question | undefined = useMemo(() => {
+    if (!interview || !interview.questions.length) return undefined;
+    return interview.questions[interview.current_question_index];
+  }, [interview]);
+
+  const totalQuestions = interview?.questions.length || 0;
+  const currentQIndex = (interview?.current_question_index || 0) + 1;
+  const isLastQuestion = currentQIndex >= totalQuestions;
+
+  // Auto-Submit ref to avoid duplicate submissions
+  const isAutoSubmittingRef = useRef<boolean>(false);
+
+  // Unified Media Capture Hook with VAD Callbacks
   const {
     isRecording,
     isCameraReady,
     isMicReady,
-    audioTrackState,
-    videoTrackState,
+    isSpeaking,
     micLevelPercent,
     recordingDuration,
-    recordedBlob,
     recordedUrl,
-    sha256Hash,
-    mimeType,
+    liveTranscript,
     stream,
     error: mediaError,
     startRecording,
     stopRecording,
     resetRecording,
-  } = useMediaCapture({ enableVideo: true, enableAudio: true });
-
-  // WebSocket hook for live session events & heartbeat
-  const { status: wsStatus } = useInterviewWebSocket({
-    interviewId,
-    enabled: Boolean(interviewId),
+  } = useMediaCapture({
+    enableVideo: true,
+    enableAudio: true,
+    enableVAD: true,
+    onSpeechStart: () => {
+      cancelInterviewerSpeech();
+      sendEvent("candidate.speaking", { question_id: currentQuestion?.id });
+      setConvState("LISTENING");
+    },
+    onSpeechEnd: () => {
+      sendEvent("candidate.stopped", { question_id: currentQuestion?.id });
+      if (!isAutoSubmittingRef.current && !isSubmitting && isRecording) {
+        void handleAutoFinishAnswer();
+      }
+    },
   });
 
   // Fetch or initialize interview session
@@ -129,7 +288,11 @@ export default function LiveInterviewRoomPage() {
     if (saved === null) {
       setIsConsentModalOpen(true);
     } else {
-      setHasConsent(saved === "true");
+      const granted = saved === "true";
+      setHasConsent(granted);
+      if (granted) {
+        setHasUserStarted(true);
+      }
     }
   }, []);
 
@@ -137,129 +300,130 @@ export default function LiveInterviewRoomPage() {
     setHasConsent(granted);
     localStorage.setItem("aptly_recording_consent", String(granted));
     setIsConsentModalOpen(false);
+    if (granted) {
+      setHasUserStarted(true);
+    }
   };
 
-  // Current Question helper
-  const currentQuestion: Question | undefined = useMemo(() => {
-    if (!interview || !interview.questions.length) return undefined;
-    return interview.questions[interview.current_question_index];
-  }, [interview]);
-
-  const totalQuestions = interview?.questions.length || 0;
-  const currentQIndex = (interview?.current_question_index || 0) + 1;
-  const isLastQuestion = currentQIndex >= totalQuestions;
-
-  const beginRecordingCountdown = useCallback(() => {
-    setAutoRecordCountdown(3);
-    const timer = window.setInterval(() => {
-      setAutoRecordCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          window.clearInterval(timer);
-          void startRecording();
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [startRecording]);
-
-  // Use server-side Gemini TTS first, with browser speech as a resilient fallback.
+  // Conversational Audio Loop: Speak question, then enter LISTENING mode
   useEffect(() => {
-    if (!hasConsent || isRecording || recordedBlob || isSubmitting || currentAnswer) {
+    if (!hasConsent || !currentQuestion || isLoading || isSubmitting || !hasUserStarted) return;
+    const qId = currentQuestion.id;
+
+    if (spokenQuestionIdsRef.current.has(qId) || currentAnswer) {
       return;
     }
-    if (!currentQuestion || typeof window === "undefined") return;
 
-    let cancelled = false;
-    const speakFallback = () => {
-      if (cancelled) return;
-      if (!("speechSynthesis" in window)) {
-        beginRecordingCountdown();
-        return;
-      }
+    spokenQuestionIdsRef.current.add(qId);
+    let isCancelled = false;
+
+    const beginListening = () => {
+      if (isCancelled) return;
+      setConvState("LISTENING");
+      void startRecording();
+    };
+
+    if (voiceEnabled) {
+      setConvState("INTERVIEWER_SPEAKING");
+
+      // Auto-fallback timeout in case browser pauses speech or tab is throttled
+      const maxSpeechWait = Math.min(10000, Math.max(3500, currentQuestion.question_text.length * 60));
+      const fallbackTimer = setTimeout(() => {
+        if (!isCancelled && convState === "INTERVIEWER_SPEAKING") {
+          beginListening();
+        }
+      }, maxSpeechWait);
+
+      speakQuestionAudio(
+        currentQuestion.question_text,
+        currentQuestion.interviewer_persona,
+        () => {
+          clearTimeout(fallbackTimer);
+          beginListening();
+        },
+      );
+
+      return () => {
+        isCancelled = true;
+        clearTimeout(fallbackTimer);
+        if (typeof window !== "undefined" && "speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+      };
+    } else {
+      beginListening();
+    }
+  }, [currentQuestion, hasConsent, isLoading, isSubmitting, currentAnswer, voiceEnabled, hasUserStarted, startRecording, speakQuestionAudio, convState]);
+
+  // Start Session manually (unlocks browser audio gesture)
+  const handleStartSession = () => {
+    setHasUserStarted(true);
+    if (currentQuestion) {
+      setConvState("INTERVIEWER_SPEAKING");
+      speakQuestionAudio(
+        currentQuestion.question_text,
+        currentQuestion.interviewer_persona,
+        () => {
+          setConvState("LISTENING");
+          void startRecording();
+        },
+      );
+    } else {
+      setConvState("LISTENING");
+      void startRecording();
+    }
+  };
+
+  // Replay Question Audio
+  const handleReplayAudio = () => {
+    if (!currentQuestion) return;
+    setConvState("INTERVIEWER_SPEAKING");
+    speakQuestionAudio(
+      currentQuestion.question_text,
+      currentQuestion.interviewer_persona,
+      () => {
+        setConvState("LISTENING");
+        if (!isRecording) {
+          void startRecording();
+        }
+      },
+    );
+  };
+
+  // Jump straight to answering
+  const handleStartAnsweringNow = () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(currentQuestion.question_text);
-      utterance.rate = 0.98;
-      utterance.pitch = 1.04;
-      utterance.onend = () => {
-        setIsTtsPlaying(false);
-        beginRecordingCountdown();
-      };
-      utterance.onerror = () => {
-        setIsTtsPlaying(false);
-        beginRecordingCountdown();
-      };
-      window.speechSynthesis.speak(utterance);
-    };
-
-    setIsTtsPlaying(true);
-    void apiClient
-      .postBlob(`/api/v1/interviews/${interviewId}/narrate`, { text: currentQuestion.question_text })
-      .then((blob) => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        narrationRef.current = audio;
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          narrationRef.current = null;
-          setIsTtsPlaying(false);
-          beginRecordingCountdown();
-        };
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          narrationRef.current = null;
-          setIsTtsPlaying(false);
-          speakFallback();
-        };
-        void audio.play().catch(() => {
-          setIsTtsPlaying(false);
-          speakFallback();
-        });
-      })
-      .catch(() => {
-        setIsTtsPlaying(false);
-        speakFallback();
-      });
-
-    return () => {
-      cancelled = true;
-      narrationRef.current?.pause();
-      narrationRef.current = null;
-      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-    };
-  }, [
-    beginRecordingCountdown,
-    currentAnswer,
-    currentQuestion,
-    hasConsent,
-    interviewId,
-    isRecording,
-    isSubmitting,
-    recordedBlob,
-  ]);
+    }
+    setHasUserStarted(true);
+    setConvState("LISTENING");
+    void startRecording();
+  };
 
   // Enforce Maximum Answer Duration (180s)
   useEffect(() => {
     if (isRecording && recordingDuration >= 180) {
-      void stopRecording();
+      void handleAutoFinishAnswer();
     }
-  }, [isRecording, recordingDuration, stopRecording]);
+  }, [isRecording, recordingDuration]);
 
-  // Handle Stop Recording
-  const handleStopRecording = async () => {
-    await stopRecording();
-  };
-
-  // Submit Answer to Backend
-  const handleSubmitAnswer = async () => {
-    if (!recordedBlob || !currentQuestion) return;
-
+  // Auto-finish and submit turn
+  const handleAutoFinishAnswer = async () => {
+    if (isAutoSubmittingRef.current || isSubmitting || !currentQuestion) return;
+    isAutoSubmittingRef.current = true;
     setIsSubmitting(true);
-    setErrorMessage(null);
+    setConvState("PROCESSING");
 
     try {
-      // 1. Create Answer record if not already created
+      const { blob, transcript } = await stopRecording();
+      if (!blob || blob.size === 0) {
+        setIsSubmitting(false);
+        isAutoSubmittingRef.current = false;
+        setConvState("LISTENING");
+        return;
+      }
+
+      // Step 1: Create Answer record
       let answerId = currentAnswer?.id;
       if (!answerId) {
         const createdAns = await apiClient.post<Answer>(
@@ -270,14 +434,21 @@ export default function LiveInterviewRoomPage() {
         setCurrentAnswer(createdAns);
       }
 
-      // 2. Upload video/audio binary via FormData
+      // Step 2: Upload recording with exact candidate transcript
+      const finalTranscript = (transcript || liveTranscript || "").trim();
       const formData = new FormData();
       formData.append(
         "audio_file",
-        recordedBlob,
+        blob,
         `recording_${currentQuestion.id}.webm`,
       );
       formData.append("duration_seconds", String(recordingDuration || 5.0));
+      if (finalTranscript.length > 0) {
+        formData.append("transcript_text", finalTranscript);
+      }
+
+      setConvState("THINKING");
+      sendEvent("interview.thinking", { question_id: currentQuestion.id });
 
       const processedAns = await apiClient.upload<Answer>(
         `/api/v1/interviews/${interviewId}/answers/${answerId}/upload`,
@@ -285,27 +456,7 @@ export default function LiveInterviewRoomPage() {
       );
       setCurrentAnswer(processedAns);
 
-      // Refresh interview data (picks up any Gemini adaptive follow-up inserted)
-      const updated = await apiClient.get<InterviewDetail>(
-        `/api/v1/interviews/${interviewId}`,
-      );
-      setInterview(updated);
-      resetRecording();
-    } catch (err: unknown) {
-      setErrorMessage(
-        err instanceof Error ? err.message : "Error uploading and processing recording.",
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Advance to Next Question / Follow-up
-  const handleNextQuestion = async () => {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-
-    try {
+      // Step 3: Advance to next question / follow-up
       const updated = await apiClient.post<InterviewDetail>(
         `/api/v1/interviews/${interviewId}/next-question`,
       );
@@ -313,22 +464,37 @@ export default function LiveInterviewRoomPage() {
       setCurrentAnswer(null);
       resetRecording();
 
-      // If completed, redirect to review
+      // Check if session completed
       if (updated.status === "completed") {
+        setConvState("ENDING");
         router.push(`/interview/${interviewId}/review`);
+      } else {
+        const nextQ = updated.questions[updated.current_question_index];
+        if (nextQ && nextQ.question_source === "follow_up") {
+          setConvState("FOLLOWING_UP");
+        } else {
+          setConvState("ADVANCING");
+        }
       }
     } catch (err: unknown) {
+      console.error("Answer submission failed:", err);
       setErrorMessage(
-        err instanceof Error ? err.message : "Failed to advance to next question.",
+        err instanceof Error ? err.message : "Error processing answer.",
       );
+      setConvState("LISTENING");
     } finally {
       setIsSubmitting(false);
+      isAutoSubmittingRef.current = false;
     }
   };
 
-  // Complete Interview
+  // Complete Interview Early
   const handleFinishInterview = async () => {
     setIsSubmitting(true);
+    setConvState("ENDING");
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
     try {
       await apiClient.post<InterviewDetail>(
         `/api/v1/interviews/${interviewId}/finish`,
@@ -339,70 +505,9 @@ export default function LiveInterviewRoomPage() {
         err instanceof Error ? err.message : "Failed to finish interview.",
       );
       setIsSubmitting(false);
+      setConvState("LISTENING");
     }
   };
-
-  const handleDoubt = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!doubt.trim() || !currentQuestion) return;
-    setIsExplaining(true);
-    try {
-      const response = await apiClient.post<DoubtResponse>(
-        `/api/v1/interviews/${interviewId}/questions/${currentQuestion.id}/explain`,
-        {
-          doubt: doubt.trim(),
-          candidate_answer: currentAnswer?.transcript?.full_text ?? "",
-        },
-      );
-      setDoubtAnswer(response);
-    } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : "The interviewer could not explain that yet.");
-    } finally {
-      setIsExplaining(false);
-    }
-  };
-
-  // Build Diagnostics object for Dev Quality Panel
-  const diagnosticsData: RecordingDiagnostics = useMemo(
-    () => ({
-      micState: isMicReady ? "CONNECTED" : "DISCONNECTED",
-      audioTrackState,
-      cameraState: isCameraReady ? "CONNECTED" : "DISCONNECTED",
-      videoTrackState,
-      recordingState: isRecording
-        ? "RECORDING"
-        : isSubmitting
-        ? "PROCESSING"
-        : currentAnswer?.status === "transcribed"
-        ? "PROCESSED"
-        : "READY",
-      mimeType,
-      codec: "opus,vp9",
-      blobSizeBytes: recordedBlob?.size || 0,
-      durationSeconds: recordingDuration,
-      sha256Hash,
-      micLevelPercent,
-      audioStreamDetected: isMicReady && audioTrackState === "LIVE",
-      normalizedFormat: "16kHz Mono PCM WAV",
-      whisperStatus: currentAnswer?.status === "transcribed" ? "COMPLETED" : "PENDING",
-      transcriptWordCount: currentAnswer?.transcript?.word_count || 0,
-      geminiStatus: currentAnswer?.status === "transcribed" ? "COMPLETED" : "PENDING",
-    }),
-    [
-      isMicReady,
-      audioTrackState,
-      isCameraReady,
-      videoTrackState,
-      isRecording,
-      isSubmitting,
-      currentAnswer,
-      mimeType,
-      recordedBlob,
-      recordingDuration,
-      sha256Hash,
-      micLevelPercent,
-    ],
-  );
 
   if (isLoading) {
     return (
@@ -410,7 +515,7 @@ export default function LiveInterviewRoomPage() {
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
           <p className="text-sm font-mono text-slate-400">
-            Initializing Realtime Interview Session & Video Engine...
+            Connecting Realtime Conversational Engine...
           </p>
         </div>
       </AppShell>
@@ -436,7 +541,7 @@ export default function LiveInterviewRoomPage() {
           </div>
           <div>
             <h1 className="text-sm font-bold text-slate-100">
-              {interview?.title || "Practice Interview Session"}
+              {interview?.title || "Live Practice Session"}
             </h1>
             <p className="text-xs text-slate-400">
               {interview?.difficulty_level?.toUpperCase()} • {interview?.interview_type?.toUpperCase()}
@@ -444,37 +549,45 @@ export default function LiveInterviewRoomPage() {
           </div>
         </div>
 
-        {/* Progress Stepper & WS Status */}
-        <div className="flex items-center gap-4">
+        {/* Dynamic State Indicator & Voice Toggle */}
+        <div className="flex items-center gap-3">
+          {/* Voice Mute Toggle */}
+          <button
+            type="button"
+            onClick={() => setVoiceEnabled(!voiceEnabled)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-300 hover:text-white transition"
+          >
+            {voiceEnabled ? (
+              <>
+                <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
+                <span>AI Voice On</span>
+              </>
+            ) : (
+              <>
+                <VolumeX className="h-3.5 w-3.5 text-slate-500" />
+                <span>Muted</span>
+              </>
+            )}
+          </button>
+
+          {/* Progress Tracker */}
           <div className="flex items-center gap-1.5 bg-slate-900/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300">
             <span>
-              Question {currentQIndex} of {totalQuestions}
+              Turn {currentQIndex} of {totalQuestions}
             </span>
-            <div className="flex gap-1 ml-2">
-              {interview?.questions.map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`h-1.5 w-4 rounded-full transition-all ${
-                    idx === interview.current_question_index
-                      ? "bg-indigo-400 shadow-[0_0_8px_rgba(99,102,241,0.8)]"
-                      : idx < interview.current_question_index
-                      ? "bg-emerald-500"
-                      : "bg-slate-700"
-                  }`}
-                />
-              ))}
-            </div>
           </div>
 
           <div
             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-mono ${
-              wsStatus === "connected"
+              liveStatus === "Interviewer speaking" || liveStatus === "Listening" || liveStatus === "Candidate speaking"
                 ? "border-emerald-500/30 bg-emerald-950/30 text-emerald-300"
+                : liveStatus === "Connecting" || liveStatus === "Processing turn"
+                ? "border-violet-500/30 bg-violet-950/30 text-violet-300"
                 : "border-amber-500/30 bg-amber-950/30 text-amber-300"
             }`}
           >
             <Radio className="h-3 w-3 animate-pulse" />
-            <span>{wsStatus === "connected" ? "Realtime Live" : "Reconnecting"}</span>
+            <span>{isFallback ? "Offline fallback" : liveStatus}</span>
           </div>
         </div>
       </div>
@@ -482,7 +595,12 @@ export default function LiveInterviewRoomPage() {
       {repairQuestion > 0 && (
         <div className="mb-6 flex items-start gap-3 rounded-2xl border border-violet-300/20 bg-violet-300/8 p-4 text-sm text-violet-100">
           <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-violet-200" />
-          <div><p className="font-semibold">Repair Mode · question {repairQuestion}</p><p className="mt-1 text-xs leading-5 text-violet-100/70">Use the same prompt again. Lead with the headline, add the missing proof, and compare this rep with the evidence on your report.</p></div>
+          <div>
+            <p className="font-semibold">Repair Mode · Question {repairQuestion}</p>
+            <p className="mt-1 text-xs leading-5 text-violet-100/70">
+              Lead with the headline, ground your claims with concrete baselines, and explain the architectural trade-offs.
+            </p>
+          </div>
         </div>
       )}
 
@@ -490,215 +608,214 @@ export default function LiveInterviewRoomPage() {
         <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-950/40 p-4 text-sm text-red-200 backdrop-blur-md">
           <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
           <div>
-            <p className="font-semibold">Camera / Microphone Notice</p>
-            <p className="text-xs text-red-300/90 mt-0.5">
-              {errorMessage || mediaError}
-            </p>
+            <p className="font-semibold">Notice</p>
+            <p className="text-xs text-red-300/90 mt-0.5">{errorMessage || mediaError}</p>
           </div>
         </div>
       )}
 
-      {/* ── MAIN INTERVIEW SPLIT CONSOLE ──────────────────────────── */}
+      {/* ── START PROMPT BANNER (Gestures unlock browser speech synthesis) ── */}
+      {!hasUserStarted && (
+        <div className="mb-6 rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-cyan-950/40 via-indigo-950/40 to-slate-900/60 p-6 backdrop-blur-xl flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300">
+              <Volume2 className="h-6 w-6 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Ready for your practice interview?</h3>
+              <p className="text-xs text-slate-300">Click start to hear the interviewer speak the first question aloud and begin.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleStartSession}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-400 transition"
+            >
+              <Play className="h-4 w-4 fill-white" />
+              <span>Start Interview (Hear Question)</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MAIN INTERVIEW CONSOLE ─────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Active Question */}
+        {/* Left Column: AI Interviewer Persona & Spoken Question */}
         <div className="lg:col-span-6 space-y-6">
-          <Card className="glass-panel-glow p-8 min-h-[420px] flex flex-col justify-between">
+          <PanelInterviewerDeck
+            activePersona={currentQuestion?.interviewer_persona}
+            isTtsPlaying={convState === "INTERVIEWER_SPEAKING"}
+          />
+
+          <Card className="glass-panel-glow p-8 min-h-[360px] flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {currentQuestion?.interviewer_persona && (
+                    <span
+                      className={`rounded-md border px-2.5 py-1 text-xs font-bold uppercase tracking-wider ${
+                        String(currentQuestion.interviewer_persona).toUpperCase().includes("HR")
+                          ? "border-violet-500/40 bg-violet-950/60 text-violet-300"
+                          : "border-cyan-500/40 bg-cyan-950/60 text-cyan-300"
+                      }`}
+                    >
+                      {String(currentQuestion.interviewer_persona).toUpperCase().includes("HR")
+                        ? "Sarah Chen · HR"
+                        : "Alex Rivera · Tech"}
+                    </span>
+                  )}
                   <span className="rounded-md border border-indigo-500/40 bg-indigo-950/60 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider text-indigo-300">
                     {currentQuestion?.category || "Technical"}
                   </span>
                   {currentQuestion?.question_source === "follow_up" && (
                     <Badge variant="purple" className="text-xs">
-                      Gemini Adaptive Follow-Up
+                      ClaimChaser Follow-Up
                     </Badge>
                   )}
-                  <span className="rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-300">
-                    {currentQuestion?.competency || "Core Engineering"}
-                  </span>
                 </div>
-                {isTtsPlaying && (
-                  <span className="flex items-center gap-1 text-xs font-mono text-cyan-400 animate-pulse">
-                    <Volume2 className="h-3.5 w-3.5" />
-                    Speaking Question...
-                  </span>
-                )}
-                {autoRecordCountdown !== null && (
-                  <span className="text-xs font-mono text-amber-400 font-bold animate-bounce">
-                    Auto-record in {autoRecordCountdown}...
-                  </span>
+
+                {/* State Pill */}
+                <div className="flex items-center gap-2">
+                  {convState === "INTERVIEWER_SPEAKING" && (
+                    <span className="flex items-center gap-1.5 text-xs font-mono text-cyan-300 animate-pulse">
+                      <Volume2 className="h-3.5 w-3.5" />
+                      Interviewer Speaking
+                    </span>
+                  )}
+                  {convState === "LISTENING" && (
+                    <span className="flex items-center gap-1.5 text-xs font-mono text-emerald-300">
+                      <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                      Listening to you...
+                    </span>
+                  )}
+                  {convState === "PROCESSING" && (
+                    <span className="flex items-center gap-1.5 text-xs font-mono text-amber-300">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Transcribing speech...
+                    </span>
+                  )}
+                  {convState === "THINKING" && (
+                    <span className="flex items-center gap-1.5 text-xs font-mono text-violet-300">
+                      <Cpu className="h-3.5 w-3.5 animate-pulse" />
+                      Analyzing claims...
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Active Question Text */}
+              <div className="mt-4">
+                <p className="text-xl sm:text-2xl font-bold tracking-tight text-white leading-relaxed">
+                  &ldquo;{currentQuestion?.question_text}&rdquo;
+                </p>
+                {currentQuestion?.target_competency && (
+                  <p className="mt-3 text-xs font-mono text-slate-400">
+                    Probing: <span className="text-slate-200">{currentQuestion.target_competency}</span>
+                  </p>
                 )}
               </div>
 
-              <h2 className="text-2xl font-bold leading-relaxed text-slate-100 mt-4">
-                {currentQuestion?.question_text || "No active question."}
-              </h2>
+              {/* Live Transcript Preview */}
+              {liveTranscript && (
+                <div className="mt-4 p-3.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 text-xs text-slate-300 flex items-start gap-2.5 backdrop-blur-md">
+                  <Mic className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5 animate-pulse" />
+                  <div>
+                    <span className="font-mono text-[11px] text-emerald-400 font-bold tracking-wider uppercase block mb-0.5">Live Spoken Transcript:</span>
+                    <p className="italic text-slate-100 leading-relaxed">&ldquo;{liveTranscript}&rdquo;</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Question Action Controls */}
+              <div className="mt-5 flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleReplayAudio}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/40 px-3 py-1.5 text-xs font-medium text-cyan-300 hover:bg-cyan-900/60 transition"
+                >
+                  <Volume2 className="h-3.5 w-3.5" />
+                  <span>Hear Question Aloud</span>
+                </button>
+                {convState === "INTERVIEWER_SPEAKING" && (
+                  <button
+                    type="button"
+                    onClick={handleStartAnsweringNow}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 transition"
+                  >
+                    <Mic className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>Skip to Answer</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Expected evaluation criteria preview */}
-            {currentQuestion?.expected_topics && currentQuestion.expected_topics.length > 0 && (
-              <div className="mt-8 rounded-xl border border-slate-800/80 bg-slate-950/60 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                  Key Focus Areas for this Question:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {currentQuestion.expected_topics.map((topic, idx) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1 text-xs text-slate-300"
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
-                      {topic}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Conversational Prompt Helper */}
+            <div className="mt-8 border-t border-slate-800/80 pt-4 flex items-center justify-between text-xs text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
+                VAD auto-detects when you finish speaking
+              </span>
+              {convState === "LISTENING" && (
+                <button
+                  type="button"
+                  onClick={handleAutoFinishAnswer}
+                  disabled={isSubmitting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow-sm"
+                >
+                  <Send className="h-3 w-3" />
+                  <span>Finish Turn</span>
+                </button>
+              )}
+            </div>
           </Card>
         </div>
 
-        {/* Right Column: Live Camera Video & Recording Console */}
-        <div className="lg:col-span-6 space-y-6">
-          <Card className="glass-panel p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Video
-                  className={`h-5 w-5 ${
-                    isRecording ? "text-red-400 animate-pulse" : "text-indigo-400"
-                  }`}
-                />
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-200">
-                  {isRecording ? "Recording Your Answer" : "Live Video & Audio Capture"}
-                </h3>
-              </div>
-              <div className="flex items-center gap-3 font-mono text-sm">
-                {isRecording && (
-                  <div className="flex items-center space-x-1.5">
-                    <Mic className="h-4 w-4 text-emerald-400 animate-pulse" />
-                    <div className="w-16 bg-slate-800 h-2 rounded-full overflow-hidden">
-                      <div
-                        className="bg-emerald-400 h-full transition-all duration-75"
-                        style={{ width: `${Math.min(100, micLevelPercent)}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5">
-                  <Clock className="h-4 w-4 text-slate-400" />
-                  <span
-                    className={
-                      isRecording
-                        ? "font-bold text-red-400 animate-pulse"
-                        : "text-slate-400"
-                    }
-                  >
-                    {recordingDuration.toFixed(1)}s / 180s
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Live Camera Preview / Recorded Video Playback */}
+        {/* Right Column: Candidate Video & Microphone Waveform */}
+        <div className="lg:col-span-6 space-y-4">
+          <div className="relative w-full aspect-video rounded-2xl overflow-hidden shadow-2xl">
             <VideoPreview
               stream={stream}
-              recordedUrl={recordedUrl}
-              isRecording={isRecording}
               isCameraReady={isCameraReady}
               isMicReady={isMicReady}
-              className="mb-4"
-            />
-
-            {/* Live Audio Frequency Waveform */}
-            <AudioVisualizer
-              stream={stream}
               isRecording={isRecording}
-              className="my-3"
+              recordedUrl={recordedUrl}
             />
 
-            {/* Recording Controls */}
-            <div className="mt-4 flex flex-col gap-3">
-              {!isRecording && !recordedBlob && (
-                <button
-                  type="button"
-                  onClick={startRecording}
-                  disabled={isSubmitting}
-                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-500/20 transition-all hover:from-red-400 hover:to-rose-500 hover:shadow-red-500/30 disabled:opacity-50"
-                >
-                  <Video className="h-5 w-5" />
-                  <span>Start Recording Answer</span>
-                </button>
-              )}
+            {/* Speaking Indicator Badge */}
+            {isSpeaking && (
+              <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 text-xs font-mono backdrop-blur-md z-40">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Speaking ({micLevelPercent}%)</span>
+              </div>
+            )}
 
-              {isRecording && (
-                <button
-                  type="button"
-                  onClick={handleStopRecording}
-                  className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-amber-500/20 transition-all hover:from-amber-400 hover:to-orange-500 animate-pulse"
-                >
-                  <Square className="h-5 w-5 fill-current" />
-                  <span>Finish Answer</span>
-                </button>
-              )}
+            {/* Timer Pill */}
+            {isRecording && (
+              <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/70 border border-white/15 text-xs font-mono text-white backdrop-blur-md z-40">
+                <Clock className="h-3.5 w-3.5 text-rose-400" />
+                <span>
+                  {Math.floor(recordingDuration / 60)}:
+                  {Math.floor(recordingDuration % 60)
+                    .toString()
+                    .padStart(2, "0")}
+                </span>
+              </div>
+            )}
+          </div>
 
-              {recordedBlob && !isRecording && (
-                <div className="space-y-3">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={resetRecording}
-                      disabled={isSubmitting}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 py-3 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white disabled:opacity-50"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      <span>Re-record</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleSubmitAnswer}
-                      disabled={isSubmitting}
-                      className="flex-2 inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-600 px-5 py-3 text-xs font-bold text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-400 hover:to-cyan-500 disabled:opacity-50"
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                          <span>Normalizing & Evaluating with Gemini...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-3.5 w-3.5" />
-                          <span>Submit & Analyze</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Already Submitted / Processed State */}
-              {currentAnswer && currentAnswer.status === "transcribed" && (
-                <div className="mt-2 rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-3.5">
-                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs mb-1">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>Answer Transcribed & Verified</span>
-                  </div>
-                  <p className="text-xs text-slate-300 font-mono">
-                    Speech rate: {currentAnswer.speech_metrics?.wpm} WPM •{" "}
-                    {currentAnswer.speech_metrics?.filler_count} Fillers detected
-                  </p>
-                </div>
-              )}
+          {/* Microphone Waveform Visualizer */}
+          <Card className="glass-panel p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
+              <Mic className={`h-4 w-4 ${isMicReady ? "text-emerald-400" : "text-slate-600"}`} />
+              <span>{isMicReady ? "Microphone Live" : "Mic Off"}</span>
+            </div>
+            <div className="flex-1 max-w-[260px]">
+              <AudioVisualizer isRecording={isRecording} stream={stream} />
             </div>
           </Card>
         </div>
       </div>
-
-      <section className="mt-6 rounded-2xl border border-cyan-300/15 bg-cyan-300/5 p-5 sm:p-6">
-        <div className="flex items-start gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-200"><HelpCircle className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold text-white">Ask the interviewer for clarification</h2><p className="mt-1 text-xs leading-5 text-slate-500">Pause the practice at any time. APTLY explains the concept in context, then you answer in your own words.</p></div></div>
-        <form onSubmit={handleDoubt} className="mt-4 flex flex-col gap-3 sm:flex-row"><input value={doubt} onChange={(event) => setDoubt(event.target.value)} placeholder="What does this part of the question mean?" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-300/40" /><button type="submit" disabled={isExplaining || !doubt.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{isExplaining ? "Explaining…" : "Explain this"}</button></form>
-        {doubtAnswer && <div className="mt-4 rounded-xl border border-white/10 bg-black/15 p-4"><p className="text-sm leading-6 text-slate-300">{doubtAnswer.answer}</p><p className="mt-3 border-t border-white/8 pt-3 text-xs leading-5 text-cyan-100/70"><span className="font-semibold text-cyan-100">Takeaway:</span> {doubtAnswer.takeaway}</p></div>}
-      </section>
 
       {/* ── FOOTER NAVIGATION ─────────────────────────────────────── */}
       <div className="mt-8 flex items-center justify-between border-t border-slate-800/80 pt-6">
@@ -719,24 +836,21 @@ export default function LiveInterviewRoomPage() {
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 px-8 py-3.5 text-sm font-bold text-slate-950 shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-400"
           >
             <Sparkles className="h-4 w-4 text-slate-950" />
-            <span>Complete Interview & Review Metrics</span>
+            <span>Complete & View Evidence Report</span>
             <ArrowRight className="h-4 w-4 text-slate-950" />
           </button>
         ) : (
           <button
             type="button"
-            onClick={handleNextQuestion}
-            disabled={isSubmitting}
+            onClick={handleAutoFinishAnswer}
+            disabled={isSubmitting || !isRecording}
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-600 px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-400 hover:to-cyan-500 disabled:opacity-50"
           >
-            <span>Next Question</span>
+            <span>{isSubmitting ? "Analyzing..." : "Submit Answer & Continue"}</span>
             <ArrowRight className="h-4 w-4" />
           </button>
         )}
       </div>
-
-      {/* ── DEV QUALITY & RECORDING DIAGNOSTICS PANEL ──────────────── */}
-      <RecordingQualityPanel diagnostics={diagnosticsData} />
     </AppShell>
   );
 }

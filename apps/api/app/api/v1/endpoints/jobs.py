@@ -9,7 +9,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, get_llm_provider
+from app.core.security import AuthenticatedUser
+from app.dependencies import get_db, get_llm_provider, get_optional_current_user
 from app.models.job import Job
 from app.schemas.jobs import JobAnalyzeRequest, JobResponse, RoleProfileResponse
 from app.services.providers.base import LLMProvider
@@ -29,6 +30,7 @@ async def analyze_job_description(
     payload: JobAnalyzeRequest,
     db: AsyncSession = Depends(get_db),
     llm_provider: LLMProvider = Depends(get_llm_provider),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> JobResponse:
     """Analyze a Job Description and persist Job & RoleProfile."""
     analyzer = RoleAnalyzerService(llm_provider)
@@ -37,6 +39,8 @@ async def analyze_job_description(
         title_override=payload.title,
         company=payload.company,
     )
+    if user:
+        job.user_id = user.id
 
     db.add(job)
     await db.commit()

@@ -12,15 +12,14 @@ from pydantic import Field
 
 from app.schemas.common import AptlyBaseModel, VersionedSchema
 from app.schemas.content_intelligence import (
-    AnswerCorrectness,
     ClaimItem,
     EvidenceItem,
     FeedbackItem,
     PracticeDrill,
     StarAnalysis,
-    TopicCoverage,
 )
 from app.schemas.jobs import RoleProfileResponse
+from app.schemas.panel import PanelInterviewReport, PersonaProfile
 
 # ── Question Schemas ──────────────────────────────────────────────────────────
 
@@ -43,6 +42,8 @@ class QuestionResponse(AptlyBaseModel):
     question_source: str = "initial"
     follow_up_depth: int = 0
     target_competency: str = ""
+    interviewer_persona: str | None = None
+    persona_profile: PersonaProfile | None = None
 
 
 # ── Transcript & Speech Metrics Schemas ───────────────────────────────────────
@@ -111,11 +112,6 @@ class ContentMetricsResponse(VersionedSchema):
     structure_score: float
     evidence_score: float
     overall_content_score: float
-    correctness_status: AnswerCorrectness = AnswerCorrectness.NOT_ENOUGH_EVIDENCE
-    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
-    correctness_summary: str = ""
-    topic_coverage: list[TopicCoverage] = Field(default_factory=list)
-    ideal_answer_outline: list[str] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     star_analysis: StarAnalysis | None = None
@@ -172,12 +168,12 @@ class InterviewCreateRequest(AptlyBaseModel):
     )
     title: str = Field(default="Practice Interview", max_length=255)
     interview_type: str = Field(
-        default="mixed", description="mixed, technical, behavioral"
+        default="mixed", description="mixed, technical, behavioral, panel"
     )
     difficulty_level: str = Field(default="medium", description="easy, medium, hard")
     target_duration_minutes: int = Field(default=10, ge=3, le=60)
     question_count: int = Field(default=3, ge=1, le=10)
-    learner_id: str = Field(default="anonymous", min_length=1, max_length=120)
+    is_panel_mode: bool = Field(default=False, description="Enable Dual-Persona AI Panel Mode.")
 
 
 class InterviewResponse(VersionedSchema):
@@ -190,7 +186,7 @@ class InterviewResponse(VersionedSchema):
     difficulty_level: str
     target_duration_minutes: int
     current_question_index: int
-    learner_id: str = "anonymous"
+    is_panel_mode: bool = False
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -207,6 +203,14 @@ class InterviewDetailResponse(InterviewResponse):
 # ── Post-Interview Review Schemas ─────────────────────────────────────────────
 
 
+from app.schemas.answer_dna import (
+    BehavioralAnswerDNA,
+    SessionCompetencyCoverage,
+    TechnicalAnswerDNA,
+)
+from app.schemas.evidence import EvidenceEvent, EvidenceEventType, EvidenceSource
+
+
 class QuestionReviewItem(AptlyBaseModel):
     """Detailed review of an individual question and answer."""
 
@@ -215,6 +219,8 @@ class QuestionReviewItem(AptlyBaseModel):
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
     content_metrics: ContentMetricsResponse | None = None
+    technical_dna: TechnicalAnswerDNA | None = None
+    behavioral_dna: BehavioralAnswerDNA | None = None
 
 
 class ReportHabit(AptlyBaseModel):
@@ -227,23 +233,12 @@ class ReportHabit(AptlyBaseModel):
     impact: str
     drill_title: str
     drill_instructions: str
+    evidence_event_ids: list[str] = Field(
+        default_factory=list,
+        description="IDs of evidence events grounding this habit recommendation",
+    )
     evidence_start_seconds: float | None = None
     evidence_end_seconds: float | None = None
-
-
-class EvidenceEvent(AptlyBaseModel):
-    """Replayable event in the report timeline."""
-
-    id: str
-    type: str
-    title: str
-    description: str
-    start_seconds: float = Field(ge=0.0)
-    end_seconds: float = Field(ge=0.0)
-    severity: int = Field(default=1, ge=1, le=5)
-    reliability: float | None = Field(default=None, ge=0.0, le=1.0)
-    question_number: int | None = None
-    quote: str | None = None
 
 
 class DeliveryOverview(AptlyBaseModel):
@@ -264,13 +259,12 @@ class InterviewReportCard(AptlyBaseModel):
 
     overall_score: float = Field(ge=0.0, le=100.0)
     content_score: float = Field(ge=0.0, le=100.0)
-    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
-    correctness_summary: str = ""
     delivery_score: float = Field(ge=0.0, le=100.0)
     confidence_label: str
     strengths: list[str] = Field(default_factory=list)
     top_habits: list[ReportHabit] = Field(default_factory=list)
     evidence_events: list[EvidenceEvent] = Field(default_factory=list)
+    competency_coverage: SessionCompetencyCoverage | None = None
     delivery: DeliveryOverview
     recommended_repair_question: int | None = None
     next_session_focus: str
@@ -288,33 +282,9 @@ class InterviewReviewResponse(VersionedSchema):
     overall_filler_density: float
     total_pauses_count: int
     average_content_score: float = 0.0
-    average_correctness_score: float = 0.0
-    correct_answers_count: int = 0
     average_relevance_score: float = 0.0
     average_technical_depth_score: float = 0.0
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)
     report_card: InterviewReportCard | None = None
+    panel_report: PanelInterviewReport | None = None
 
-
-class DoubtRequest(AptlyBaseModel):
-    """Candidate question asked during an interview."""
-
-    doubt: str = Field(..., min_length=2, max_length=1200)
-    candidate_answer: str = Field(default="", max_length=4000)
-
-
-class DoubtResponse(AptlyBaseModel):
-    """Grounded explanation returned by the interviewer assistant."""
-
-    answer: str
-    takeaway: str
-    related_topics: list[str] = Field(default_factory=list)
-    provider: str
-    model: str
-
-
-class NarrationRequest(AptlyBaseModel):
-    """Text to narrate with the configured expressive TTS provider."""
-
-    text: str = Field(..., min_length=1, max_length=2000)
-    voice_id: str | None = Field(default=None, max_length=80)

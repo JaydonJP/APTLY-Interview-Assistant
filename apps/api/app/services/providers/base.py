@@ -30,6 +30,7 @@ Provider hierarchy:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -161,6 +162,15 @@ class TTSProvider(ABC):
     async def synthesize(self, request: TTSSynthesisRequest) -> TTSSynthesisResponse:
         """Convert text to audio bytes."""
         ...
+
+    @abstractmethod
+    async def stream(self, request: TTSSynthesisRequest) -> AsyncGenerator[bytes, None]:
+        """Stream chunks of synthesized audio bytes for low-latency playback."""
+        ...
+
+    async def cancel(self, request_id: str | None = None) -> None:
+        """Cancel an in-flight speech synthesis or stream."""
+        pass
 
 
 # ── Transcription Provider ────────────────────────────────────────────────────

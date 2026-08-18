@@ -12,6 +12,8 @@ import {
   Waves,
 } from "lucide-react";
 
+import { UserMenu } from "@/components/auth/UserMenu";
+
 export const metadata: Metadata = {
   title: "APTLY — Evidence-backed AI interview coaching",
 };
@@ -44,12 +46,15 @@ export default function HomePage() {
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-300/30 bg-violet-400/15 text-sm font-bold text-violet-100">A</span>
           <span className="text-sm font-semibold tracking-[0.22em] text-white">APTLY</span>
         </Link>
-        <div className="hidden items-center gap-5 text-sm text-slate-400 sm:flex">
+        <div className="hidden items-center gap-5 text-sm text-slate-400 md:flex">
           <span>Evidence-backed coaching</span>
           <span className="h-1 w-1 rounded-full bg-emerald-300" />
           <span>Browser-first privacy</span>
         </div>
-        <Link href="/dashboard" className="text-sm font-medium text-slate-300 transition hover:text-white">Open workspace</Link>
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard" className="text-sm font-medium text-slate-300 transition hover:text-white hidden sm:inline">Workspace</Link>
+          <UserMenu />
+        </div>
       </header>
 
       <section className="relative mx-auto grid max-w-[82rem] items-center gap-14 px-4 pb-20 pt-12 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:px-8 lg:pb-28 lg:pt-20">

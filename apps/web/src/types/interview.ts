@@ -62,6 +62,8 @@ export interface Job {
   created_at: string;
 }
 
+import type { PersonaProfile } from "./panel";
+
 export interface Question {
   id: string;
   interview_id: string;
@@ -78,6 +80,8 @@ export interface Question {
   question_source?: "initial" | "follow_up" | string;
   follow_up_depth?: number;
   target_competency?: string;
+  interviewer_persona?: "HR_LEAD" | "TECH_LEAD" | string | null;
+  persona_profile?: PersonaProfile | null;
 }
 
 export interface FillerOccurrence {
@@ -182,11 +186,6 @@ export interface ContentMetrics {
   structure_score: number;
   evidence_score: number;
   overall_content_score: number;
-  correctness_status: "correct" | "partially_correct" | "incorrect" | "not_enough_evidence" | string;
-  correctness_score: number;
-  correctness_summary: string;
-  topic_coverage: TopicCoverage[];
-  ideal_answer_outline: string[];
   strengths: string[];
   weaknesses: string[];
   star_analysis?: StarAnalysis | null;
@@ -199,15 +198,6 @@ export interface ContentMetrics {
   model: string;
   prompt_version: string;
   created_at: string;
-}
-
-export interface TopicCoverage {
-  topic: string;
-  covered: boolean;
-  score: number;
-  evidence_quote?: string | null;
-  explanation: string;
-  importance: string;
 }
 
 export interface Answer {
@@ -235,7 +225,7 @@ export interface InterviewDetail {
   difficulty_level: string;
   target_duration_minutes: number;
   current_question_index: number;
-  learner_id?: string;
+  is_panel_mode?: boolean;
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
@@ -261,7 +251,7 @@ export interface InterviewReview {
     difficulty_level: string;
     target_duration_minutes: number;
     current_question_index: number;
-    learner_id?: string;
+    is_panel_mode?: boolean;
     started_at?: string | null;
     completed_at?: string | null;
     created_at: string;
@@ -274,20 +264,28 @@ export interface InterviewReview {
   overall_filler_density: number;
   total_pauses_count: number;
   average_content_score?: number;
-  average_correctness_score?: number;
-  correct_answers_count?: number;
   average_relevance_score?: number;
   average_technical_depth_score?: number;
   questions_review: QuestionReviewItem[];
   report_card?: InterviewReportCard | null;
+  panel_report?: PanelInterviewReport | null;
 }
 
-export interface DoubtResponse {
-  answer: string;
-  takeaway: string;
-  related_topics: string[];
-  provider: string;
-  model: string;
+import type { EvidenceEvent } from "./evidence";
+import type { BehavioralAnswerDNA, SessionCompetencyCoverage, TechnicalAnswerDNA } from "./dna";
+import type { PanelInterviewReport } from "./panel";
+export * from "./evidence";
+export * from "./dna";
+export * from "./panel";
+
+export interface QuestionReviewItem {
+  question: Question;
+  answer?: Answer | null;
+  transcript?: Transcript | null;
+  speech_metrics?: SpeechMetrics | null;
+  content_metrics?: ContentMetrics | null;
+  technical_dna?: TechnicalAnswerDNA | null;
+  behavioral_dna?: BehavioralAnswerDNA | null;
 }
 
 export interface ReportHabit {
@@ -298,21 +296,9 @@ export interface ReportHabit {
   impact: string;
   drill_title: string;
   drill_instructions: string;
+  evidence_event_ids?: string[];
   evidence_start_seconds?: number | null;
   evidence_end_seconds?: number | null;
-}
-
-export interface EvidenceEvent {
-  id: string;
-  type: string;
-  title: string;
-  description: string;
-  start_seconds: number;
-  end_seconds: number;
-  severity: number;
-  reliability?: number | null;
-  question_number?: number | null;
-  quote?: string | null;
 }
 
 export interface DeliveryOverview {
@@ -326,16 +312,39 @@ export interface DeliveryOverview {
   metric_notes: string[];
 }
 
+export interface ConfidencePoint {
+  question_number: number;
+  score: number;
+  competency: string;
+  status: "STRONG" | "MODERATE" | "CRUMBLED" | string;
+}
+
+export interface CrumblePoint {
+  question_number: number;
+  question_text: string;
+  competency: string;
+  score: number;
+  note: string;
+}
+
+export interface PrivacyNote {
+  processing: string;
+  storage: string;
+  retention: string;
+}
+
 export interface InterviewReportCard {
   overall_score: number;
   content_score: number;
-  correctness_score: number;
-  correctness_summary: string;
   delivery_score: number;
   confidence_label: string;
   strengths: string[];
   top_habits: ReportHabit[];
+  confidence_trend?: ConfidencePoint[];
+  crumble_point?: CrumblePoint | null;
+  privacy_note?: PrivacyNote;
   evidence_events: EvidenceEvent[];
+  competency_coverage?: SessionCompetencyCoverage | null;
   delivery: DeliveryOverview;
   recommended_repair_question?: number | null;
   next_session_focus: string;

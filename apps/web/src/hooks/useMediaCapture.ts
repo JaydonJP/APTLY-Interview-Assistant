@@ -5,12 +5,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface UseMediaCaptureOptions {
   enableVideo?: boolean;
   enableAudio?: boolean;
+  enableVAD?: boolean;
+  onSpeechStart?: () => void;
+  onSpeechEnd?: () => void;
 }
 
 export interface MediaCaptureState {
   isRecording: boolean;
   isCameraReady: boolean;
   isMicReady: boolean;
+  isSpeaking: boolean;
   audioTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
   videoTrackState: "LIVE" | "ENDED" | "MUTED" | "NONE";
   micLevelPercent: number;
@@ -20,9 +24,10 @@ export interface MediaCaptureState {
   sha256Hash: string;
   stream: MediaStream | null;
   mimeType: string;
+  liveTranscript: string;
   error: string | null;
   startRecording: () => Promise<void>;
-  stopRecording: () => Promise<Blob | null>;
+  stopRecording: () => Promise<{ blob: Blob | null; transcript: string }>;
   resetRecording: () => void;
 }
 
@@ -49,13 +54,23 @@ const DEFAULT_CONSTRAINTS: MediaStreamConstraints = {
   },
 };
 
+// Typed helper for browser SpeechRecognition
+interface IWindowWithSpeech extends Window {
+  SpeechRecognition?: any;
+  webkitSpeechRecognition?: any;
+}
+
 export function useMediaCapture({
   enableVideo = true,
   enableAudio = true,
+  enableVAD = true,
+  onSpeechStart,
+  onSpeechEnd,
 }: UseMediaCaptureOptions = {}): MediaCaptureState {
   const [isRecording, setIsRecording] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isMicReady, setIsMicReady] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [audioTrackState, setAudioTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
   const [videoTrackState, setVideoTrackState] = useState<"LIVE" | "ENDED" | "MUTED" | "NONE">("NONE");
   const [micLevelPercent, setMicLevelPercent] = useState(0);
@@ -65,6 +80,7 @@ export function useMediaCapture({
   const [sha256Hash, setSha256Hash] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mimeType, setMimeType] = useState<string>("video/webm");
+  const [liveTranscript, setLiveTranscript] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -76,6 +92,18 @@ export function useMediaCapture({
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // VAD & Speech Recognition Refs
+  const isSpeakingRef = useRef<boolean>(false);
+  const speechStartTimeRef = useRef<number>(0);
+  const silenceStartTimeRef = useRef<number>(0);
+  const onSpeechStartRef = useRef(onSpeechStart);
+  const onSpeechEndRef = useRef(onSpeechEnd);
+  onSpeechStartRef.current = onSpeechStart;
+  onSpeechEndRef.current = onSpeechEnd;
+
+  const recognitionRef = useRef<any>(null);
+  const transcriptBufferRef = useRef<string>("");
 
   // Detect supported MIME type dynamically
   const getSupportedMimeType = useCallback(() => {
@@ -103,13 +131,15 @@ export function useMediaCapture({
     }
   };
 
-  // Setup Web Audio API volume monitor
+  // Setup Web Audio API volume monitor & Voice Activity Detection (VAD)
   const setupAudioMonitoring = (mediaStream: MediaStream) => {
     try {
       const audioTracks = mediaStream.getAudioTracks();
       if (audioTracks.length === 0) return;
 
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
 
       const audioCtx = new AudioCtx();
@@ -134,6 +164,45 @@ export function useMediaCapture({
         const avg = sum / bufferLength;
         const normalized = Math.min(100, Math.round((avg / 128) * 100));
         setMicLevelPercent(normalized);
+
+        // VAD Logic when recording is active
+        if (enableVAD && mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+          const now = Date.now();
+          const isVoiceActive = normalized >= 8;
+
+          if (isVoiceActive) {
+            silenceStartTimeRef.current = 0;
+            if (!isSpeakingRef.current) {
+              isSpeakingRef.current = true;
+              speechStartTimeRef.current = now;
+              setIsSpeaking(true);
+              if (onSpeechStartRef.current) {
+                onSpeechStartRef.current();
+              }
+            }
+          } else {
+            // Voice inactive (silence)
+            if (isSpeakingRef.current) {
+              if (!silenceStartTimeRef.current) {
+                silenceStartTimeRef.current = now;
+              } else {
+                const silenceDuration = now - silenceStartTimeRef.current;
+                const speechDuration = now - speechStartTimeRef.current;
+
+                // If candidate spoke for at least 2.5s and silence has lasted > 2.0s, trigger end of turn
+                if (speechDuration >= 2500 && silenceDuration >= 2000) {
+                  isSpeakingRef.current = false;
+                  setIsSpeaking(false);
+                  silenceStartTimeRef.current = 0;
+                  if (onSpeechEndRef.current) {
+                    onSpeechEndRef.current();
+                  }
+                }
+              }
+            }
+          }
+        }
+
         animFrameRef.current = requestAnimationFrame(checkVolume);
       };
 
@@ -153,12 +222,24 @@ export function useMediaCapture({
           throw new Error("Camera/Microphone capture is not supported by your browser.");
         }
 
-        const constraints: MediaStreamConstraints = {
-          video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
-          audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
-        };
-
-        const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        let mediaStream: MediaStream;
+        try {
+          const constraints: MediaStreamConstraints = {
+            video: enableVideo ? DEFAULT_CONSTRAINTS.video : false,
+            audio: enableAudio ? DEFAULT_CONSTRAINTS.audio : false,
+          };
+          mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (vidErr) {
+          if (enableVideo && enableAudio) {
+            console.warn("Camera access failed, falling back to audio-only capture:", vidErr);
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: false,
+              audio: DEFAULT_CONSTRAINTS.audio,
+            });
+          } else {
+            throw vidErr;
+          }
+        }
 
         if (!mounted) {
           mediaStream.getTracks().forEach((track) => track.stop());
@@ -207,6 +288,11 @@ export function useMediaCapture({
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
     };
   }, [enableVideo, enableAudio]);
 
@@ -214,11 +300,17 @@ export function useMediaCapture({
     setError(null);
     setRecordedBlob(null);
     setSha256Hash("");
+    setLiveTranscript("");
+    transcriptBufferRef.current = "";
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
       setRecordedUrl(null);
     }
     chunksRef.current = [];
+    isSpeakingRef.current = false;
+    silenceStartTimeRef.current = 0;
+    speechStartTimeRef.current = 0;
+    setIsSpeaking(false);
 
     // Ensure active stream
     let activeStream = streamRef.current;
@@ -261,65 +353,136 @@ export function useMediaCapture({
       timerRef.current = setInterval(() => {
         setRecordingDuration((Date.now() - startTimeRef.current) / 1000);
       }, 100);
+
+      // Start Browser Speech Recognition for Live Accurate Transcripts
+      if (typeof window !== "undefined") {
+        const win = window as IWindowWithSpeech;
+        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        if (SpeechRec) {
+          try {
+            const recognition = new SpeechRec();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = "en-US";
+
+            recognition.onresult = (event: any) => {
+              let fullText = "";
+              for (let i = 0; i < event.results.length; i++) {
+                fullText += event.results[i][0].transcript + " ";
+              }
+              const clean = fullText.trim();
+              transcriptBufferRef.current = clean;
+              setLiveTranscript(clean);
+            };
+
+            recognition.onerror = () => {
+              // Ignore background speech recognition errors
+            };
+
+            recognition.onend = () => {
+              // Auto-restart if still recording
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+                try {
+                  recognition.start();
+                } catch {}
+              }
+            };
+
+            recognition.start();
+            recognitionRef.current = recognition;
+          } catch {}
+        }
+      }
     } catch (err: unknown) {
       setError(
         err instanceof Error ? err.message : "Failed to start MediaRecorder recording.",
       );
-      setIsRecording(false);
     }
-  }, [recordedUrl, enableVideo, enableAudio, getSupportedMimeType]);
+  }, [enableAudio, enableVideo, getSupportedMimeType, recordedUrl]);
 
-  const stopRecording = useCallback(async (): Promise<Blob | null> => {
+  const stopRecording = useCallback((): Promise<{ blob: Blob | null; transcript: string }> => {
     return new Promise((resolve) => {
+      // Get finalized transcript from buffer
+      const finalTranscript = (transcriptBufferRef.current || liveTranscript || "").trim();
+
+      // Stop speech recognition
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+
       const recorder = mediaRecorderRef.current;
       if (!recorder || recorder.state === "inactive") {
         setIsRecording(false);
-        resolve(recordedBlob);
+        setIsSpeaking(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        resolve({ blob: recordedBlob, transcript: finalTranscript });
         return;
       }
 
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-
       recorder.onstop = async () => {
-        const finalType = mimeType || "video/webm";
-        const combinedBlob = new Blob(chunksRef.current, { type: finalType });
-        const url = URL.createObjectURL(combinedBlob);
-        const hash = await computeChecksum(combinedBlob);
-
-        setRecordedBlob(combinedBlob);
-        setRecordedUrl(url);
-        setSha256Hash(hash);
         setIsRecording(false);
-        resolve(combinedBlob);
+        setIsSpeaking(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+
+        const type = mimeType || "video/webm";
+        const finalBlob = new Blob(chunksRef.current, { type });
+        setRecordedBlob(finalBlob);
+
+        const url = URL.createObjectURL(finalBlob);
+        setRecordedUrl(url);
+
+        const hash = await computeChecksum(finalBlob);
+        setSha256Hash(hash);
+
+        resolve({ blob: finalBlob, transcript: finalTranscript });
       };
 
       recorder.stop();
     });
-  }, [recordedBlob, mimeType]);
+  }, [liveTranscript, mimeType, recordedBlob]);
 
   const resetRecording = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
     if (recordedUrl) {
       URL.revokeObjectURL(recordedUrl);
     }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
     chunksRef.current = [];
+    isSpeakingRef.current = false;
+    silenceStartTimeRef.current = 0;
+    speechStartTimeRef.current = 0;
+    setIsRecording(false);
+    setIsSpeaking(false);
     setRecordedBlob(null);
     setRecordedUrl(null);
-    setSha256Hash("");
-    setIsRecording(false);
     setRecordingDuration(0);
-    setError(null);
+    setSha256Hash("");
+    setLiveTranscript("");
+    transcriptBufferRef.current = "";
   }, [recordedUrl]);
 
   return {
     isRecording,
     isCameraReady,
     isMicReady,
+    isSpeaking,
     audioTrackState,
     videoTrackState,
     micLevelPercent,
@@ -329,6 +492,7 @@ export function useMediaCapture({
     sha256Hash,
     stream,
     mimeType,
+    liveTranscript,
     error,
     startRecording,
     stopRecording,

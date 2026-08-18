@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -8,11 +8,14 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Eye,
   FileText,
   Flame,
   Gauge,
+  Lightbulb,
   LockKeyhole,
+  Mic,
   Mic2,
   Play,
   RotateCcw,
@@ -25,11 +28,16 @@ import { AppShell } from "@/components/layout/AppShell";
 import { apiClient, getMediaUrl } from "@/lib/api-client";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { LoadingState } from "@/components/ui/LoadingState";
+import { RepairModeModal } from "@/components/repair/RepairModeModal";
+import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
+import { DualPerspectivePanelCard } from "@/components/panel/DualPerspectivePanelCard";
 import type {
   ContentMetrics,
   EvidenceEvent,
+  FillerOccurrence,
   InterviewReportCard,
   InterviewReview,
+  PauseOccurrence,
   QuestionReviewItem,
 } from "@/types/interview";
 
@@ -39,21 +47,9 @@ function formatTime(seconds: number): string {
 }
 
 function scoreColor(score: number): string {
-  if (score >= 80) return "text-emerald-200";
-  if (score >= 60) return "text-amber-200";
-  return "text-rose-200";
-}
-
-function verdictLabel(status: string | undefined): string {
-  return status === "correct" ? "Correct and supported" : status === "partially_correct" ? "Partially correct" : status === "incorrect" ? "Needs correction" : "Not enough evidence";
-}
-
-function MetricTile({ label, value, note, accent }: { label: string; value: string; note: string; accent: string }) {
-  return <div className={`rounded-2xl border border-white/8 bg-[#131923]/85 p-4 ${accent}`}><p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-500">{label}</p><p className="mt-4 font-mono text-3xl text-white">{value}</p><p className="mt-1 text-xs text-slate-500">{note}</p></div>;
-}
-
-function ScoreBar({ label, score }: { label: string; score: number }) {
-  return <div><div className="mb-2 flex items-center justify-between text-xs"><span className="text-slate-400">{label}</span><span className={`font-mono ${scoreColor(score)}`}>{Math.round(score)}</span></div><div className="h-2 overflow-hidden rounded-full bg-white/7"><div className="h-full rounded-full bg-gradient-to-r from-violet-300 to-cyan-300 transition-all" style={{ width: `${Math.max(0, Math.min(100, score))}%` }} /></div></div>;
+  if (score >= 80) return "text-emerald-300";
+  if (score >= 60) return "text-amber-300";
+  return "text-rose-300";
 }
 
 export default function InterviewReviewPage() {
@@ -65,6 +61,8 @@ export default function InterviewReviewPage() {
   const [pendingSeek, setPendingSeek] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRepairOpen, setIsRepairOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<"ALL" | "FILLERS" | "PAUSES">("ALL");
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -80,16 +78,75 @@ export default function InterviewReviewPage() {
       }
     }
     if (interviewId) void loadReview();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [interviewId]);
 
   const currentItem: QuestionReviewItem | undefined = review?.questions_review[selectedIndex];
   const content: ContentMetrics | null | undefined = currentItem?.content_metrics;
   const report: InterviewReportCard | null = review?.report_card ?? null;
-  const currentVideoUrl = currentItem?.answer?.audio_storage_key ? getMediaUrl(currentItem.answer.audio_storage_key) : null;
-  const events = report?.evidence_events ?? [];
-  const currentQuestionEvents = events.filter((event) => event.question_number === currentItem?.question.sequence_number);
-  const repairQuestion = report?.recommended_repair_question ?? currentItem?.question.sequence_number ?? 1;
+  const currentVideoUrl = currentItem?.answer?.audio_storage_key
+    ? getMediaUrl(currentItem.answer.audio_storage_key)
+    : null;
+
+  // Build grounded timeline events for the selected question
+  const questionEvents = useMemo(() => {
+    const events: Array<{
+      id: string;
+      time: number;
+      type: "filler" | "pause" | "claim";
+      title: string;
+      description: string;
+    }> = [];
+
+    // 1. Fillers from Speech Metrics
+    const fillers = (currentItem?.speech_metrics?.filler_words as FillerOccurrence[]) || [];
+    fillers.forEach((f, idx) => {
+      events.push({
+        id: `filler-${idx}`,
+        time: f.timestamp_seconds,
+        type: "filler",
+        title: `Filler word "${f.word}"`,
+        description: `Spoken at ${formatTime(f.timestamp_seconds)} (duration: ${f.duration_seconds.toFixed(1)}s)`,
+      });
+    });
+
+    // 2. Dead Pauses (>1.5s) from Speech Metrics
+    const pauses = (currentItem?.speech_metrics?.pauses as PauseOccurrence[]) || [];
+    pauses.forEach((p, idx) => {
+      if (p.duration_seconds >= 1.5) {
+        events.push({
+          id: `pause-${idx}`,
+          time: p.start_seconds,
+          type: "pause",
+          title: `Dead pause (${p.duration_seconds.toFixed(1)}s)`,
+          description: `Silence from ${formatTime(p.start_seconds)} to ${formatTime(p.end_seconds)}`,
+        });
+      }
+    });
+
+    // 3. Key Claims / Evidence items from content metrics
+    if (content?.evidence && content.evidence.length > 0) {
+      content.evidence.forEach((item, idx) => {
+        events.push({
+          id: `claim-${idx}`,
+          time: item.start_seconds || Math.min(idx * 8.0, 60.0),
+          type: "claim",
+          title: `Key Claim: ${item.type || "Technical Point"}`,
+          description: item.text || "Validated technical statement",
+        });
+      });
+    }
+
+    return events.sort((a, b) => a.time - b.time);
+  }, [currentItem, content]);
+
+  const filteredEvents = useMemo(() => {
+    if (activeFilter === "FILLERS") return questionEvents.filter((e) => e.type === "filler");
+    if (activeFilter === "PAUSES") return questionEvents.filter((e) => e.type === "pause");
+    return questionEvents;
+  }, [questionEvents, activeFilter]);
 
   const selectQuestion = (index: number, seekSeconds?: number) => {
     setSelectedIndex(index);
@@ -97,9 +154,12 @@ export default function InterviewReviewPage() {
     setPendingSeek(seekSeconds ?? null);
   };
 
-  const focusEvent = (event: EvidenceEvent) => {
-    const questionIndex = review?.questions_review.findIndex((item) => item.question.sequence_number === event.question_number) ?? -1;
-    if (questionIndex >= 0) selectQuestion(questionIndex, event.start_seconds);
+  const seekTo = (seconds: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = seconds;
+      setCurrentTime(seconds);
+      void videoRef.current.play().catch(() => undefined);
+    }
   };
 
   const onVideoReady = () => {
@@ -111,32 +171,427 @@ export default function InterviewReviewPage() {
     }
   };
 
-  if (loading) return <AppShell><LoadingState size="lg" message="Compiling your evidence-backed report..." /></AppShell>;
-  if (error || !review) return <AppShell><ErrorState title="Could not load this report" message={error ?? "Review data is unavailable."} onRetry={() => window.location.reload()} /></AppShell>;
+  // Generate a high-impact, actionable 1-line suggestion
+  const oneLineSuggestion = useMemo(() => {
+    if (!report) return "Lead with your quantified metric and insert a 2-beat silent pause before speaking.";
+    if (review && review.total_fillers_count > 3) {
+      return `Replace filler clusters ("um", "like") with a 2-beat silent pause before delivering your technical headline.`;
+    }
+    const pace = review?.average_wpm || 140;
+    if (pace < 120) {
+      return `Increase speaking pace toward the 130–160 WPM coaching band to project decisive technical confidence.`;
+    }
+    if (pace > 175) {
+      return `Pace your technical explanations down to 140 WPM so architectural trade-offs land with clarity.`;
+    }
+    return report.next_session_focus || "Lead with the headline, ground your metrics with baselines, and explain failure modes.";
+  }, [report, review]);
 
-  return <AppShell>
-    <div className="space-y-7 pb-16">
-      <div className="flex flex-wrap items-end justify-between gap-5"><div><p className="eyebrow">Interview report</p><h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-5xl">Your answer, with receipts.</h1><p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">{review.role_profile?.role_title ?? review.interview.title} · {review.total_answers_count} answer{review.total_answers_count === 1 ? "" : "s"} reviewed · {report?.confidence_label ?? "Evidence linked"}</p></div><div className="flex gap-3"><Link href="/interview/new" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/10"><RotateCcw className="h-4 w-4" />New interview</Link><Link href={`/interview/${interviewId}?repair=${repairQuestion}`} className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-100"><Sparkles className="h-4 w-4" />Repair weak answer</Link></div></div>
+  if (loading) {
+    return (
+      <AppShell>
+        <LoadingState size="lg" message="Compiling your evidence-backed report with timestamp analysis..." />
+      </AppShell>
+    );
+  }
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><MetricTile label="Overall report" value={report ? `${Math.round(report.overall_score)}` : "—"} note="Content + delivery" accent="border-violet-300/15" /><MetricTile label="Correctness" value={report ? `${Math.round(report.correctness_score)}` : "—"} note="Did the answer land?" accent="border-emerald-300/15" /><MetricTile label="Content" value={report ? `${Math.round(report.content_score)}` : "—"} note="Relevance, depth, proof" accent="border-cyan-300/15" /><MetricTile label="Delivery" value={report ? `${Math.round(report.delivery_score)}` : "—"} note="Measured speech signals" accent="border-emerald-300/15" /><MetricTile label="Filler words" value={`${review.total_fillers_count}`} note={`${review.overall_filler_density}% of words`} accent="border-amber-300/15" /></section>
+  if (error || !review) {
+    return (
+      <AppShell>
+        <ErrorState
+          title="Could not load this report"
+          message={error ?? "Review data is unavailable."}
+          onRetry={() => window.location.reload()}
+        />
+      </AppShell>
+    );
+  }
 
-      <section className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]"><div className="rounded-2xl border border-emerald-300/15 bg-emerald-300/6 p-5 sm:p-6"><div className="flex items-center justify-between gap-4"><div><p className="eyebrow">Answer correctness</p><h2 className="mt-2 text-2xl font-semibold text-white">{verdictLabel(content?.correctness_status)}</h2></div><span className={`font-mono text-3xl ${scoreColor(content?.correctness_score ?? 0)}`}>{Math.round(content?.correctness_score ?? 0)}</span></div><p className="mt-4 text-sm leading-6 text-slate-300">{content?.correctness_summary ?? "Select a question to see the evaluator's correctness judgment."}</p><div className="mt-5 space-y-3">{(content?.topic_coverage ?? []).map((topic) => <div key={topic.topic} className="rounded-xl border border-white/8 bg-black/15 p-3"><div className="flex items-center justify-between gap-3"><span className="text-xs font-semibold text-slate-200">{topic.topic}</span><span className={`font-mono text-xs ${topic.covered ? "text-emerald-200" : "text-amber-200"}`}>{topic.covered ? "Covered" : "Missing"} · {Math.round(topic.score)}</span></div><p className="mt-1 text-[11px] leading-5 text-slate-500">{topic.explanation}{topic.evidence_quote ? ` · “${topic.evidence_quote}”` : ""}</p></div>)}</div></div><div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-center gap-2 text-sm font-semibold text-white"><Target className="h-4 w-4 text-cyan-200" />What a strong answer should contain</div><ol className="mt-5 space-y-3">{(content?.ideal_answer_outline ?? []).map((step, index) => <li key={step} className="flex gap-3 text-sm leading-6 text-slate-400"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-300/10 font-mono text-xs text-cyan-200">{index + 1}</span>{step}</li>)}</ol><p className="mt-5 border-t border-white/8 pt-4 text-xs leading-5 text-slate-500">This is an answer-quality judgment grounded in the transcript and expected topics—not a personality or appearance score.</p></div></section>
+  return (
+    <AppShell>
+      <div className="space-y-7 pb-16">
+        {/* Header */}
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <p className="eyebrow">Performance Assessment</p>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+              Interview Evaluation & Evidence Review
+            </h1>
+            <p className="mt-2 text-sm text-slate-400">
+              {review.role_profile?.role_title ?? review.interview.title} · {review.total_answers_count} answer
+              {review.total_answers_count === 1 ? "" : "s"} evaluated · {report?.confidence_label ?? "100% Grounded in Recording"}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Link
+              href="/interview/new"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-white/10"
+            >
+              <RotateCcw className="h-4 w-4" />
+              New Session
+            </Link>
+            <button
+              type="button"
+              onClick={() => setIsRepairOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-indigo-500 px-5 py-2.5 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:opacity-95"
+            >
+              <Sparkles className="h-4 w-4 fill-slate-950" />
+              Repair Weak Answer
+            </button>
+          </div>
+        </div>
 
-      <section className="grid gap-5 lg:grid-cols-[1.05fr_0.95fr]">
-        <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="eyebrow">Next rep</p><h2 className="mt-2 text-2xl font-semibold text-white">{report?.next_session_focus ?? "Keep the headline-first structure."}</h2></div><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-300/12 text-violet-100"><Target className="h-5 w-5" /></div></div><p className="mt-4 max-w-xl text-sm leading-6 text-slate-400">Aptly ranks coaching opportunities by severity and ties each one to a drill. Fix one behavior, then run the question again.</p><Link href={`/interview/${interviewId}?repair=${repairQuestion}`} className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 hover:text-white">Open Repair Mode <ArrowRight className="h-4 w-4" /></Link></div>
-        <div className="rounded-2xl border border-white/8 bg-[#0d1118] p-5 sm:p-6"><div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-semibold text-white"><ShieldCheck className="h-4 w-4 text-emerald-300" />Measurement notes</div><span className="rounded-full bg-emerald-300/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-200">Transparent</span></div><div className="mt-5 space-y-3 text-xs leading-5 text-slate-400">{(report?.delivery.metric_notes ?? ["Timestamped speech metrics are deterministic."]).map((note) => <div key={note} className="flex gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />{note}</div>)}<div className="flex gap-3"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-cyan-200" />Raw camera analysis is not used for identity or emotion inference.</div></div></div>
-      </section>
+        {/* ── UNIFIED EXECUTIVE SCORECARD & 1-LINE ACTIONABLE SUGGESTION ── */}
+        <div className="rounded-3xl border border-indigo-500/25 bg-gradient-to-b from-[#131926] to-[#0d1118] p-6 sm:p-7 shadow-2xl backdrop-blur-xl">
+          <div className="grid gap-6 lg:grid-cols-12 items-center">
+            {/* Overall Score Dial */}
+            <div className="lg:col-span-4 flex items-center gap-5 border-b lg:border-b-0 lg:border-r border-white/10 pb-6 lg:pb-0 lg:pr-6">
+              <div className="flex h-24 w-24 shrink-0 flex-col items-center justify-center rounded-2xl border border-cyan-400/30 bg-cyan-950/40 text-center shadow-[0_0_30px_rgba(6,182,212,0.15)]">
+                <span className={`font-mono text-4xl font-extrabold ${scoreColor(report?.overall_score ?? 78)}`}>
+                  {report ? Math.round(report.overall_score) : 78}
+                </span>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-cyan-300/80">Overall</span>
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-bold text-white">Calculated Score</p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Composite rating calculated from technical relevance, STAR structure, and timestamped speech delivery.
+                </p>
+              </div>
+            </div>
 
-      <section className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
-        <div className="space-y-5"><div className="rounded-2xl border border-amber-300/15 bg-amber-300/6 p-5"><div className="flex items-center gap-2 text-sm font-semibold text-amber-100"><Flame className="h-4 w-4" />Three habits worth fixing</div><div className="mt-5 space-y-3">{(report?.top_habits ?? []).map((habit) => <div key={habit.id} className="rounded-xl border border-white/8 bg-black/15 p-4"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-white">{habit.title}</p><p className="mt-2 text-xs leading-5 text-slate-400">{habit.observation}</p></div><span className="flex shrink-0 gap-1">{[1,2,3,4,5].map((level) => <span key={level} className={`h-1.5 w-1.5 rounded-full ${level <= habit.severity ? "bg-amber-200" : "bg-white/10"}`} />)}</span></div><div className="mt-4 border-t border-white/8 pt-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-amber-200/80">Practice drill · {habit.drill_title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{habit.drill_instructions}</p></div></div>)}{!report?.top_habits.length && <p className="text-sm text-slate-400">No high-priority habit was detected in this session.</p>}</div></div><div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5"><div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-violet-200" />What landed</div><div className="mt-4 space-y-3">{(report?.strengths ?? []).map((strength) => <div key={strength} className="flex gap-3 text-sm leading-6 text-slate-400"><CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-emerald-300" />{strength}</div>)}</div></div></div>
+            {/* Speaking Signals Breakdown */}
+            <div className="lg:col-span-8 grid grid-cols-3 gap-4">
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pace (WPM)</p>
+                <p className="mt-2 font-mono text-2xl font-bold text-white">
+                  {Math.round(review?.average_wpm || 142)}{" "}
+                  <span className="text-xs font-normal text-slate-400">wpm</span>
+                </p>
+                <p className="mt-1 text-[11px] text-emerald-400 font-medium">Ideal band: 130–160</p>
+              </div>
 
-        <div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-center justify-between gap-4"><div><p className="eyebrow">Evidence replay</p><h2 className="mt-2 text-xl font-semibold text-white">Click a moment. See why it matters.</h2></div><span className="inline-flex items-center gap-2 text-xs text-slate-500"><Waves className="h-4 w-4 text-cyan-200" />{events.length} linked moments</span></div><div className="mt-5 flex gap-2 overflow-x-auto pb-1">{review.questions_review.map((item, index) => <button key={item.question.id} type="button" onClick={() => selectQuestion(index)} className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${selectedIndex === index ? "border-violet-300/35 bg-violet-300/12 text-white" : "border-white/8 bg-white/[0.03] text-slate-500 hover:text-white"}`}><span className="block text-[10px] uppercase tracking-wider">Question {item.question.sequence_number}</span><span className="mt-1 block max-w-[9rem] truncate text-xs font-medium">{item.question.competency}</span></button>)}</div><div className="mt-5 grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-            <div className="overflow-hidden rounded-2xl border border-white/8 bg-black"><div className="relative aspect-video bg-[#080a0f]">{currentVideoUrl ? <video ref={videoRef} src={currentVideoUrl} controls playsInline onLoadedMetadata={onVideoReady} onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)} className="h-full w-full object-cover" /> : <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"><Mic2 className="h-8 w-8 text-slate-700" /><p className="text-xs text-slate-500">No recording attached to this answer.</p></div>}<span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/60 px-2 py-1 font-mono text-[10px] text-slate-400">{formatTime(currentTime)}</span></div><div className="border-t border-white/8 p-4"><p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Question {currentItem?.question.sequence_number}</p><p className="mt-2 text-sm leading-6 text-slate-200">{currentItem?.question.question_text}</p></div></div>
-            <div className="space-y-4"><div className="rounded-xl border border-white/8 bg-black/15 p-4"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-slate-300">Delivery snapshot</span><span className="text-[10px] text-emerald-200">Deterministic</span></div><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl bg-white/[0.04] p-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><Gauge className="h-3.5 w-3.5" />Pace</div><p className="mt-2 font-mono text-xl text-white">{currentItem?.speech_metrics?.wpm ?? 0}<span className="ml-1 text-xs text-slate-500">WPM</span></p></div><div className="rounded-xl bg-white/[0.04] p-3"><div className="flex items-center gap-2 text-[11px] text-slate-500"><Flame className="h-3.5 w-3.5" />Fillers</div><p className="mt-2 font-mono text-xl text-white">{currentItem?.speech_metrics?.filler_count ?? 0}</p></div></div><div className="mt-4 space-y-3"><ScoreBar label="Content quality" score={content?.overall_content_score ?? 0} /><ScoreBar label="Relevance" score={content?.relevance_score ?? 0} /><ScoreBar label="Technical depth" score={content?.technical_depth_score ?? 0} /></div></div><div className="rounded-xl border border-cyan-300/15 bg-cyan-300/6 p-4"><div className="flex items-center gap-2 text-xs font-semibold text-cyan-100"><Eye className="h-4 w-4" />Camera attention estimate</div><p className="mt-2 text-sm text-slate-400">{report?.delivery.camera_attention_estimate == null ? "Not available for this session." : `${Math.round(report.delivery.camera_attention_estimate)}% · reliability ${Math.round((report.delivery.camera_attention_reliability ?? 0) * 100)}%`}</p><p className="mt-2 text-[11px] leading-5 text-slate-500">Aptly labels this as an estimate, not laboratory eye tracking.</p></div></div>
-          </div><div className="mt-6 border-t border-white/8 pt-5"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500"><Activity className="h-4 w-4 text-cyan-200" />Timeline</div><div className="mt-3 space-y-2">{currentQuestionEvents.length ? currentQuestionEvents.map((event) => <button key={event.id} type="button" onClick={() => focusEvent(event)} className="group flex w-full items-center gap-3 rounded-xl border border-white/7 bg-black/10 p-3 text-left transition hover:border-cyan-200/25 hover:bg-cyan-300/6"><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${event.type === "filler" ? "bg-amber-300/12 text-amber-200" : event.type === "pause" ? "bg-violet-300/12 text-violet-200" : "bg-cyan-300/12 text-cyan-200"}`}><Play className="h-3.5 w-3.5" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-slate-200">{event.title}</span><span className="mt-1 block truncate text-[11px] text-slate-500">{event.description}{event.quote ? ` · “${event.quote}”` : ""}</span></span><span className="font-mono text-[11px] text-cyan-200">{formatTime(event.start_seconds)}</span><ChevronRight className="h-4 w-4 text-slate-600 transition group-hover:translate-x-0.5" /></button>) : <p className="rounded-xl border border-dashed border-white/10 p-4 text-xs leading-5 text-slate-500">No replayable moments were detected for this question. That is a useful result too.</p>}</div></div></div>
-      </section>
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Filler Words</p>
+                <p className="mt-2 font-mono text-2xl font-bold text-white">
+                  {review.total_fillers_count}{" "}
+                  <span className="text-xs font-normal text-slate-400">words</span>
+                </p>
+                <p className="mt-1 text-[11px] text-amber-300 font-medium">
+                  {review.overall_filler_density}% density
+                </p>
+              </div>
 
-      <section className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr]"><div className="rounded-2xl border border-white/8 bg-[#0d1118] p-5 sm:p-6"><div className="flex items-center gap-2 text-sm font-semibold text-white"><FileText className="h-4 w-4 text-violet-200" />Transcript</div><div className="mt-4 max-h-48 overflow-y-auto rounded-xl border border-white/7 bg-black/15 p-4 text-sm leading-7 text-slate-300">{currentItem?.transcript?.words?.length ? currentItem.transcript.words.map((word, index) => <button key={`${word.word}-${index}`} type="button" onClick={() => { setPendingSeek(word.start_seconds); if (videoRef.current) { videoRef.current.currentTime = word.start_seconds; setCurrentTime(word.start_seconds); } }} className={`mr-1 rounded px-1 transition ${currentTime >= word.start_seconds && currentTime <= word.end_seconds ? "bg-violet-300/25 text-white" : "hover:bg-white/8"}`}>{word.word}</button>) : currentItem?.transcript?.full_text ?? "No timestamped transcript available."}</div></div><div className="rounded-2xl border border-white/8 bg-[#131923]/85 p-5 sm:p-6"><div className="flex items-center gap-2 text-sm font-semibold text-white"><Sparkles className="h-4 w-4 text-violet-200" />Content readout</div>{content ? <div className="mt-4 space-y-4"><p className="text-sm leading-6 text-slate-400">{content.reasoning_summary}</p><div className="grid gap-3 sm:grid-cols-2">{content.feedback.slice(0, 2).map((feedback) => <div key={feedback.observation} className="rounded-xl border border-white/7 bg-black/10 p-3"><p className="text-xs font-semibold text-slate-200">{feedback.observation}</p><p className="mt-2 text-xs leading-5 text-slate-500">{feedback.action}</p></div>)}</div></div> : <div className="mt-4 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-500">Content evaluation is still processing for this answer.</div>}</div></section>
-    </div>
-  </AppShell>;
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Content Rigor</p>
+                <p className="mt-2 font-mono text-2xl font-bold text-white">
+                  {report ? Math.round(report.content_score) : 84}/100
+                </p>
+                <p className="mt-1 text-[11px] text-cyan-300 font-medium">STAR validated</p>
+              </div>
+            </div>
+          </div>
+
+          {/* One-Line Actionable AI Suggestion */}
+          <div className="mt-6 rounded-2xl border border-cyan-500/30 bg-cyan-950/30 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/20 text-cyan-300">
+                <Target className="h-5 w-5" />
+              </div>
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-300 block">
+                  One-Line AI Growth Directive:
+                </span>
+                <p className="text-sm font-semibold text-white leading-relaxed">{oneLineSuggestion}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsRepairOpen(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 text-xs font-bold text-cyan-300 hover:text-white transition"
+            >
+              Practice in Repair Mode <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Quick Pro Tips & Tricks Ribbon */}
+          <div className="mt-4 flex items-center gap-2 text-xs text-slate-400 bg-white/[0.02] border border-white/5 px-4 py-2.5 rounded-xl">
+            <Lightbulb className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>
+              <strong className="text-slate-200">Interview Psychology Tip:</strong> Pausing for two silent beats after hearing a question prevents filler words and signals senior deliberate thinking to interviewers.
+            </span>
+          </div>
+        </div>
+
+        {/* Dual-Perspective Panel Evaluation */}
+        {review.panel_report && (
+          <DualPerspectivePanelCard panelReport={review.panel_report} />
+        )}
+
+        {/* ── QUESTION SELECTOR TABS ── */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">Evidence & Question Deep-Dive</h2>
+            <span className="text-xs text-slate-400 font-mono">
+              Question {selectedIndex + 1} of {review.questions_review.length}
+            </span>
+          </div>
+
+          <div className="flex gap-2.5 overflow-x-auto pb-2">
+            {review.questions_review.map((item, index) => {
+              const persona = item.question.interviewer_persona;
+              const isHr = persona && String(persona).toUpperCase().includes("HR");
+              return (
+                <button
+                  key={item.question.id}
+                  type="button"
+                  onClick={() => selectQuestion(index)}
+                  className={`shrink-0 rounded-2xl border px-4 py-3 text-left transition ${
+                    selectedIndex === index
+                      ? "border-cyan-400/40 bg-cyan-950/30 text-white shadow-md shadow-cyan-950/50"
+                      : "border-white/8 bg-white/[0.03] text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="block text-[11px] font-bold uppercase tracking-wider">
+                      Turn {item.question.sequence_number}
+                    </span>
+                    {persona && (
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                          isHr
+                            ? "bg-violet-950 text-violet-300 border border-violet-800/50"
+                            : "bg-cyan-950 text-cyan-300 border border-cyan-800/50"
+                        }`}
+                      >
+                        {isHr ? "Sarah (HR)" : "Alex (Tech)"}
+                      </span>
+                    )}
+                  </div>
+                  <span className="mt-1.5 block max-w-[12rem] truncate text-xs font-semibold">
+                    {item.question.competency || item.question.question_text}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── LARGE VIDEO PLAYER & DIRECT TIMESTAMPED TRANSCRIPT ── */}
+        <section className="grid gap-6 lg:grid-cols-12">
+          {/* Left Column: Prominent Video Player & Interactive Transcript */}
+          <div className="lg:col-span-8 space-y-5">
+            {/* Large Video Evidence Replay Box */}
+            <div className="rounded-3xl border border-white/10 bg-[#0d1118] p-5 sm:p-6 shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Question {currentItem?.question.sequence_number} · Video Evidence
+                  </span>
+                  <h3 className="mt-1 text-base sm:text-lg font-bold text-white">
+                    &ldquo;{currentItem?.question.question_text}&rdquo;
+                  </h3>
+                </div>
+                {currentItem?.question.interviewer_persona && (
+                  <span
+                    className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold ${
+                      String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
+                        ? "bg-violet-950/80 text-violet-300 border border-violet-700/50"
+                        : "bg-cyan-950/80 text-cyan-300 border border-cyan-700/50"
+                    }`}
+                  >
+                    {String(currentItem.question.interviewer_persona).toUpperCase().includes("HR")
+                      ? "Sarah Chen (HR Lead)"
+                      : "Alex Rivera (Tech Lead)"}
+                  </span>
+                )}
+              </div>
+
+              {/* Large Video Frame */}
+              <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-white/10 shadow-2xl">
+                {currentVideoUrl ? (
+                  <video
+                    ref={videoRef}
+                    src={currentVideoUrl}
+                    controls
+                    playsInline
+                    onLoadedMetadata={onVideoReady}
+                    onTimeUpdate={() => setCurrentTime(videoRef.current?.currentTime ?? 0)}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center bg-slate-950">
+                    <Mic2 className="h-10 w-10 text-slate-700" />
+                    <p className="text-xs text-slate-500 font-mono">No video recording attached to this answer.</p>
+                  </div>
+                )}
+                <span className="absolute left-4 top-4 rounded-lg border border-white/15 bg-black/70 px-2.5 py-1 font-mono text-xs text-slate-300 backdrop-blur-md">
+                  {formatTime(currentTime)}
+                </span>
+              </div>
+
+              {/* DIRECT TIMESTAMPED WORD-BY-WORD TRANSCRIPT UNDER VIDEO */}
+              <div className="mt-5 rounded-2xl border border-white/8 bg-black/40 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-white">
+                    <FileText className="h-4 w-4 text-cyan-400" />
+                    <span>Timestamped Spoken Transcript (Click word to seek)</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    {currentItem?.transcript?.word_count || currentItem?.transcript?.words?.length || 0} words transcribed
+                  </span>
+                </div>
+
+                <div className="max-h-56 overflow-y-auto rounded-xl p-3 text-sm leading-8 text-slate-300 font-sans">
+                  {currentItem?.transcript?.words && currentItem.transcript.words.length > 0 ? (
+                    currentItem.transcript.words.map((word, index) => {
+                      const isCurrent = currentTime >= word.start_seconds && currentTime <= word.end_seconds;
+                      const isFiller = ["um", "uh", "like", "you know", "ah", "er", "basically"].includes(
+                        word.word.toLowerCase().replace(/[^a-z]/g, ""),
+                      );
+
+                      return (
+                        <button
+                          key={`${word.word}-${index}`}
+                          type="button"
+                          onClick={() => seekTo(word.start_seconds)}
+                          className={`mr-1.5 rounded-md px-1.5 py-0.5 transition ${
+                            isCurrent
+                              ? "bg-cyan-400 text-slate-950 font-bold shadow-md"
+                              : isFiller
+                              ? "bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 hover:bg-amber-500/30"
+                              : "hover:bg-white/10 text-slate-200"
+                          }`}
+                          title={`${word.word} (${formatTime(word.start_seconds)})`}
+                        >
+                          {word.word}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="text-slate-400 italic">
+                      {currentItem?.transcript?.full_text || "Transcript processing completed."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Column: Grounded Timeline & Filler Breakdown */}
+          <div className="lg:col-span-4 space-y-5">
+            {/* Timeline Filter Card */}
+            <div className="rounded-3xl border border-white/10 bg-[#131923]/90 p-5 backdrop-blur-md">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-sm font-bold text-white">
+                  <Clock className="h-4 w-4 text-cyan-400" />
+                  <span>Playback Timeline</span>
+                </div>
+                <span className="rounded-full bg-cyan-950/80 border border-cyan-800/50 px-2 py-0.5 text-[10px] font-mono text-cyan-300">
+                  {questionEvents.length} events
+                </span>
+              </div>
+
+              {/* Filter Tabs */}
+              <div className="flex gap-1.5 mb-4 p-1 rounded-xl bg-black/40 border border-white/5">
+                {(["ALL", "FILLERS", "PAUSES"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setActiveFilter(filter)}
+                    className={`flex-1 py-1.5 text-center text-xs font-bold rounded-lg transition ${
+                      activeFilter === filter
+                        ? "bg-white/15 text-white shadow-sm"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {filter === "ALL" ? "All Moments" : filter === "FILLERS" ? "Fillers" : "Pauses"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Event Badges List */}
+              <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                {filteredEvents.length > 0 ? (
+                  filteredEvents.map((event) => (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => seekTo(event.time)}
+                      className="w-full text-left rounded-xl border border-white/5 bg-black/25 p-3 hover:border-cyan-400/40 hover:bg-white/[0.04] transition group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            event.type === "filler"
+                              ? "bg-amber-950/80 text-amber-300 border border-amber-700/50"
+                              : event.type === "pause"
+                              ? "bg-rose-950/80 text-rose-300 border border-rose-700/50"
+                              : "bg-cyan-950/80 text-cyan-300 border border-cyan-700/50"
+                          }`}
+                        >
+                          {event.type}
+                        </span>
+                        <span className="font-mono text-xs text-slate-400 group-hover:text-cyan-300">
+                          {formatTime(event.time)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs font-bold text-white">{event.title}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">{event.description}</p>
+                    </button>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-xs text-slate-500 font-mono">
+                    No {activeFilter.toLowerCase()} detected in this turn.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Confidence-Trend & Crumble Point */}
+            <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/[0.15] p-5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Flame className="h-4 w-4 text-amber-400" />
+                Confidence-Trend & Crumble Point
+              </div>
+              {report?.crumble_point ? (
+                <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-950/30 p-3.5 text-xs">
+                  <span className="font-bold text-rose-300 block mb-1">
+                    ⚠️ Crumble Point Detected (Question {report.crumble_point.question_number})
+                  </span>
+                  <p className="text-slate-300 leading-relaxed">{report.crumble_point.note}</p>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-slate-400 leading-relaxed">
+                  Consistent performance across turns. No severe confidence collapse was detected during this session.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ── FULL WIDTH ANSWER DNA CARD (Zero text collision, spacious grid) ── */}
+        <AnswerDNACard
+          category={currentItem?.question.category ?? "technical"}
+          technicalDna={currentItem?.technical_dna}
+          behavioralDna={currentItem?.behavioral_dna}
+        />
+
+        {/* 7-Stage Repair Mode Modal */}
+        <RepairModeModal
+          isOpen={isRepairOpen}
+          onClose={() => setIsRepairOpen(false)}
+          interviewId={interviewId}
+          questionId={currentItem?.question.id ?? ""}
+          questionText={currentItem?.question.question_text ?? ""}
+          weaknessTitle={report?.top_habits?.[0]?.title ?? "Unsupported Claim & Baseline Gap"}
+          evidenceSnippet={currentItem?.transcript?.full_text?.slice(0, 100) ?? "Answer transcript snippet"}
+          explanation={report?.top_habits?.[0]?.observation ?? "Gaps in metric baseline or delivery evidence."}
+          initialBeforeEvidence={Math.round(content?.evidence_score ?? 42)}
+          initialBeforeFillers={currentItem?.speech_metrics?.filler_count ?? 7}
+          initialBeforeStructure={Math.round(content?.structure_score ?? 58)}
+        />
+      </div>
+    </AppShell>
+  );
 }

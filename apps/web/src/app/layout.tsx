@@ -3,6 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ReactQueryProvider } from "@/components/providers/ReactQueryProvider";
 import { ErrorBoundary } from "@/components/providers/ErrorBoundary";
+import { AuthProvider } from "@/components/auth/AuthContext";
+import { AuthModal } from "@/components/auth/AuthModal";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -41,9 +43,15 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <ErrorBoundary>
-          <ReactQueryProvider>{children}</ReactQueryProvider>
+          <AuthProvider>
+            <ReactQueryProvider>
+              {children}
+              <AuthModal />
+            </ReactQueryProvider>
+          </AuthProvider>
         </ErrorBoundary>
       </body>
     </html>
   );
 }
+

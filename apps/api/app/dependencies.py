@@ -140,7 +140,7 @@ async def get_storage(
     )
 
 
-# ── LLM Provider (Google Gemini Pure Engine) ─────────────────────────────────
+# ── LLM Provider (Google Gemini / Ollama Qwen / Mock) ───────────────────────
 
 
 @lru_cache
@@ -148,11 +148,27 @@ def _get_llm_provider_instance(
     provider: str,
     api_key: str = "",
     model: str = "gemini-2.5-flash",
+    ollama_base_url: str = "http://localhost:11434",
+    ollama_model: str = "hf.co/mradermacher/interview-assistant-model-GGUF:Q4_K_M",
 ) -> LLMProvider:
     """Create and cache the LLM provider (singleton)."""
     if provider == "mock":
         logger.info("llm_provider_init", provider="mock")
         return MockLLMProvider()
+    if provider in ("qwen", "ollama"):
+        from app.services.providers.ollama_llm import OllamaLLMProvider
+
+        logger.info("llm_provider_init", provider="ollama", model=ollama_model)
+        fallback = (
+            GeminiLLMProvider(api_key=api_key, model=model)
+            if api_key
+            else MockLLMProvider()
+        )
+        return OllamaLLMProvider(
+            base_url=ollama_base_url,
+            model=ollama_model,
+            fallback_provider=fallback,
+        )
     if provider in ("gemini", "google"):
         from app.services.providers.gemini_llm import GeminiLLMProvider
 
@@ -161,7 +177,7 @@ def _get_llm_provider_instance(
             api_key=api_key,
             model=model or "gemini-2.5-flash",
         )
-    msg = f"LLM provider '{provider}' is not supported. Use 'gemini' or 'mock'."
+    msg = f"LLM provider '{provider}' is not supported. Use 'gemini', 'ollama', or 'mock'."
     raise NotImplementedError(msg)
 
 
@@ -170,10 +186,13 @@ async def get_llm_provider(
 ) -> LLMProvider:
     """FastAPI dependency: returns the configured LLM provider."""
     key = settings.gemini_api_key or settings.llm_api_key
+    target_provider = settings.interview_llm_provider or settings.llm_provider
     return _get_llm_provider_instance(
-        settings.llm_provider,
+        target_provider,
         key,
         settings.llm_model,
+        settings.ollama_base_url,
+        settings.ollama_model,
     )
 
 
@@ -186,35 +205,32 @@ async def get_content_analysis_service(
     return ContentAnalysisService(llm_provider=llm_provider)
 
 
-# ── TTS Provider ──────────────────────────────────────────────────────────────
+# ── TTS Provider (ElevenLabs / Mock) ─────────────────────────────────────────
 
 
 @lru_cache
 def _get_tts_provider_instance(
     provider: str,
     api_key: str = "",
-    model: str = "gemini-3.1-flash-tts-preview",
-    voice: str = "Kore",
-    style: str = "",
-    timeout_seconds: float = 30.0,
+    model_id: str = "eleven_flash_v2_5",
+    hr_voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    tech_lead_voice_id: str = "ErXwobaYiN019PkySvjV",
 ) -> TTSProvider:
     """Create and cache the TTS provider (singleton)."""
     if provider == "mock":
         logger.info("tts_provider_init", provider="mock")
         return MockTTSProvider()
-    if provider == "gemini":
-        from app.services.providers.gemini_tts import GeminiTTSProvider
+    if provider == "elevenlabs":
+        from app.services.providers.elevenlabs_tts import ElevenLabsTTSProvider
 
-        logger.info("tts_provider_init", provider="gemini", model=model, voice=voice)
-        return GeminiTTSProvider(
+        logger.info("tts_provider_init", provider="elevenlabs", model_id=model_id)
+        return ElevenLabsTTSProvider(
             api_key=api_key,
-            model=model or "gemini-3.1-flash-tts-preview",
-            voice=voice or "Kore",
-            style=style,
-            timeout_seconds=timeout_seconds,
+            model_id=model_id,
+            hr_voice_id=hr_voice_id,
+            tech_lead_voice_id=tech_lead_voice_id,
         )
-    # Phase 1+: add elevenlabs, openai implementations here
-    msg = f"TTS provider '{provider}' is not yet implemented"
+    msg = f"TTS provider '{provider}' is not supported. Use 'elevenlabs' or 'mock'."
     raise NotImplementedError(msg)
 
 
@@ -222,13 +238,16 @@ async def get_tts_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TTSProvider:
     """FastAPI dependency: returns the configured TTS provider."""
+    api_key = settings.elevenlabs_api_key or settings.tts_api_key
+    provider = settings.tts_provider
+    if api_key and provider == "mock":
+        provider = "elevenlabs"
     return _get_tts_provider_instance(
-        settings.tts_provider,
-        settings.gemini_api_key or settings.tts_api_key,
-        settings.tts_model,
-        settings.tts_voice,
-        settings.tts_style,
-        settings.tts_timeout_seconds,
+        provider,
+        api_key,
+        settings.elevenlabs_model_id,
+        settings.elevenlabs_hr_voice_id,
+        settings.elevenlabs_tech_lead_voice_id,
     )
 
 
@@ -277,3 +296,65 @@ async def get_transcription_provider(
         settings.whisperx_device,
         settings.whisperx_compute_type,
     )
+
+
+# ── Supabase Authentication ───────────────────────────────────────────────────
+
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Header, HTTPException, status
+from app.core.security import AuthenticatedUser, decode_supabase_token
+
+security_bearer = HTTPBearer(auto_error=False)
+
+
+async def get_optional_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_bearer)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    x_user_id: Annotated[str | None, Header(alias="X-User-ID")] = None,
+    x_candidate_id: Annotated[str | None, Header(alias="X-Candidate-ID")] = None,
+) -> AuthenticatedUser | None:
+    """
+    FastAPI dependency: returns the authenticated user if Bearer token or client session
+    header (X-User-ID / X-Candidate-ID) is provided, ensuring session isolation.
+    """
+    token = None
+    if credentials:
+        token = credentials.credentials
+    elif authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+
+    if token:
+        user = decode_supabase_token(token)
+        if user:
+            return user
+
+    # Fallback to client session header for isolated practice sessions
+    client_id = x_user_id or x_candidate_id
+    if client_id and len(client_id.strip()) > 3:
+        return AuthenticatedUser(
+            id=client_id.strip(),
+            email=None,
+            role="guest",
+            metadata={},
+        )
+
+    return None
+
+
+async def get_current_user(
+    user: Annotated[AuthenticatedUser | None, Depends(get_optional_current_user)],
+) -> AuthenticatedUser:
+    """
+    FastAPI dependency: requires valid authentication. Raises HTTP 401 if missing/invalid.
+    """
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "UNAUTHORIZED",
+                "message": "Authentication required. Please sign in to access your interview data.",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+

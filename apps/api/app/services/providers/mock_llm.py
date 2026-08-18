@@ -34,24 +34,36 @@ class MockLLMProvider(LLMProvider):
     MODEL_NAME = "mock-llm-v2"
 
     async def generate_text(self, request: LLMGenerateRequest) -> LLMGenerateResponse:
-        """Return a placeholder generated text response."""
+        """Return a question-grounded generated text response."""
         logger.debug(
             "mock_llm_generate_text",
             prompt_length=len(request.prompt),
         )
+        prompt_lower = request.prompt.lower()
+
+        if "30%" in request.prompt or "accuracy" in prompt_lower:
+            text = "What was the baseline and how did you validate the 30% accuracy improvement?"
+        elif "40%" in request.prompt or "latency" in prompt_lower:
+            text = "What was the baseline latency and how did you measure the 40% reduction?"
+        elif "we built" in prompt_lower or "we migrated" in prompt_lower:
+            text = "What was your specific personal role versus the team's contribution in that project?"
+        elif "Context Anchor Quote:" in request.prompt:
+            match = re.search(r'Context Anchor Quote:\s*"([^"]+)"', request.prompt)
+            quote = match.group(1) if match else "your answer"
+            text = f"Could you provide more context on the baseline and measurement method for '{quote}'?"
+        else:
+            text = "What specific trade-offs and alternative approaches did you evaluate before making that technical decision?"
+
         return LLMGenerateResponse(
-            text=(
-                "This is a mock LLM response. "
-                f"Your prompt was {len(request.prompt)} characters."
-            ),
+            text=text,
             provider=self.PROVIDER_NAME,
             model=self.MODEL_NAME,
             model_version="mock-v2.0",
-            prompt_name="generic_text",
+            prompt_name="adaptive_followup",
             prompt_version="mock-v2",
             evaluation_schema_version="1.0",
             prompt_tokens=len(request.prompt.split()),
-            completion_tokens=30,
+            completion_tokens=25,
         )
 
     async def generate_structured(
@@ -66,6 +78,91 @@ class MockLLMProvider(LLMProvider):
 
         schema = request.output_schema
         properties = schema.get("properties", {})
+
+        # 0. ClaimChaser Analysis Schema
+        if "claims" in properties and "followup_action" in properties:
+            prompt_text = request.prompt
+            is_30_pct = "30%" in prompt_text or "accuracy" in prompt_text.lower()
+            is_40_pct = "40%" in prompt_text or "latency" in prompt_text.lower()
+
+            if is_30_pct:
+                return {
+                    "claims": [
+                        {
+                            "claim_text": "30% accuracy improvement",
+                            "claim_type": "quantitative",
+                            "support_status": "UNSUPPORTED_IN_ANSWER",
+                            "quote": "I improved recommendation accuracy by 30%.",
+                            "present_evidence": [],
+                            "missing_evidence": ["baseline", "metric definition", "validation", "personal contribution"],
+                            "recommended_action": "QUANTIFY",
+                        }
+                    ],
+                    "primary_claim": {
+                        "claim_text": "30% accuracy improvement",
+                        "claim_type": "quantitative",
+                        "support_status": "UNSUPPORTED_IN_ANSWER",
+                        "quote": "I improved recommendation accuracy by 30%.",
+                        "present_evidence": [],
+                        "missing_evidence": ["baseline", "metric definition", "validation", "personal contribution"],
+                        "recommended_action": "QUANTIFY",
+                    },
+                    "suggested_followup_question": "What was the baseline and how did you validate the 30% improvement?",
+                    "followup_action": "QUANTIFY",
+                    "confidence": 0.95,
+                }
+            elif is_40_pct:
+                return {
+                    "claims": [
+                        {
+                            "claim_text": "40% latency reduction",
+                            "claim_type": "quantitative",
+                            "support_status": "UNSUPPORTED_IN_ANSWER",
+                            "quote": "I reduced latency by 40%.",
+                            "present_evidence": [],
+                            "missing_evidence": ["baseline", "measurement", "method"],
+                            "recommended_action": "QUANTIFY",
+                        }
+                    ],
+                    "primary_claim": {
+                        "claim_text": "40% latency reduction",
+                        "claim_type": "quantitative",
+                        "support_status": "UNSUPPORTED_IN_ANSWER",
+                        "quote": "I reduced latency by 40%.",
+                        "present_evidence": [],
+                        "missing_evidence": ["baseline", "measurement", "method"],
+                        "recommended_action": "QUANTIFY",
+                    },
+                    "suggested_followup_question": "What was the baseline latency, and what measurement method confirmed the 40% reduction?",
+                    "followup_action": "QUANTIFY",
+                    "confidence": 0.95,
+                }
+            else:
+                return {
+                    "claims": [
+                        {
+                            "claim_text": "General technical implementation",
+                            "claim_type": "technical_causality",
+                            "support_status": "PARTIALLY_SUPPORTED",
+                            "quote": prompt_text[:50],
+                            "present_evidence": ["approach overview"],
+                            "missing_evidence": ["trade-offs", "alternatives considered"],
+                            "recommended_action": "PROBE",
+                        }
+                    ],
+                    "primary_claim": {
+                        "claim_text": "General technical implementation",
+                        "claim_type": "technical_causality",
+                        "support_status": "PARTIALLY_SUPPORTED",
+                        "quote": prompt_text[:50],
+                        "present_evidence": ["approach overview"],
+                        "missing_evidence": ["trade-offs", "alternatives considered"],
+                        "recommended_action": "PROBE",
+                    },
+                    "suggested_followup_question": "What trade-offs and alternative approaches did you consider for this solution?",
+                    "followup_action": "PROBE",
+                    "confidence": 0.85,
+                }
 
         # 1. Job Role Profile extraction schema
         if "role_title" in properties and "technical_skills" in properties:

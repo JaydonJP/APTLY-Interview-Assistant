@@ -1,8 +1,28 @@
 /**
- * APTLY — Realtime Event Types (WebSocket)
+ * APTLY — Realtime Event Types (WebSocket & Gemini Live)
  */
 
 export const REALTIME_PROTOCOL_VERSION = "1.0" as const;
+
+export type LiveSessionStatus =
+  | "Connecting"
+  | "Interviewer speaking"
+  | "Listening"
+  | "Candidate speaking"
+  | "Processing turn"
+  | "Reconnecting"
+  | "Offline fallback";
+
+export interface GeminiLiveTokenResponse {
+  enabled: boolean;
+  ephemeral_token: string | null;
+  expires_at: string | null;
+  model: string;
+  language_code: string;
+  voice_name: string;
+  websocket_url: string | null;
+  fallback_reason: string | null;
+}
 
 export interface WebSocketEnvelope<T = Record<string, unknown>> {
   type: string;

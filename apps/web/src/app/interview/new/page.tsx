@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { apiClient, getLearnerId } from "@/lib/api-client";
-import type { LearnerProgress } from "@/types/progress";
+import { apiClient } from "@/lib/api-client";
 import type { Job, RoleProfile, InterviewDetail } from "@/types/interview";
 import {
   Briefcase,
@@ -20,9 +19,18 @@ import {
   Code2,
 } from "lucide-react";
 
-const SAMPLE_JDS = [
+export interface JobPreset {
+  category: "Full-Stack & Web" | "Backend & Cloud" | "AI & Data" | "SRE & Security" | "Leadership & Product";
+  title: string;
+  company: string;
+  text: string;
+}
+
+const SAMPLE_JDS: JobPreset[] = [
   {
+    category: "Full-Stack & Web",
     title: "Senior Full-Stack Engineer",
+    company: "Stripe",
     text: `We are looking for a Senior Full-Stack Engineer with 5+ years of experience building modern web applications.
 Tech Stack: TypeScript, React, Next.js, Python, FastAPI, PostgreSQL, and Docker.
 Responsibilities:
@@ -32,7 +40,20 @@ Responsibilities:
 - Collaborate with product managers to deliver user-centric features.`,
   },
   {
+    category: "Full-Stack & Web",
+    title: "Staff Frontend / UI Systems Architect",
+    company: "Vercel",
+    text: `Seeking a Staff Frontend Architect to lead UI performance, accessibility, and design system engineering.
+Requirements:
+- Mastery of TypeScript, React 19, Next.js App Router, Web Vitals, and Web Workers.
+- Proven expertise in micro-frontends, client-side caching strategies, and state orchestration.
+- Deep understanding of browser rendering pipelines, bundle optimization, and SSR/SSG.
+- Track record of mentoring senior engineers and championing DX.`,
+  },
+  {
+    category: "Backend & Cloud",
     title: "Backend Infrastructure Engineer",
+    company: "Uber",
     text: `Seeking a Backend Infrastructure Engineer to scale our distributed cloud systems.
 Requirements:
 - Deep expertise in Python, Go, distributed consensus, Redis, and PostgreSQL.
@@ -41,13 +62,81 @@ Requirements:
 - Strong understanding of data integrity, zero-downtime migrations, and fault tolerance.`,
   },
   {
+    category: "Backend & Cloud",
+    title: "Principal Distributed Systems Architect",
+    company: "Netflix",
+    text: `We are hiring a Principal Distributed Systems Architect to build fault-tolerant, petabyte-scale data infrastructure.
+Responsibilities:
+- Architect multi-region microservices handling 100k+ RPS with sub-50ms latency SLAs.
+- Design asynchronous event-driven pipelines using Apache Kafka, Raft/Paxos, and gRPC.
+- Lead chaos engineering experiments, failover automation, and disaster recovery strategies.
+- Define engineering standards across technical debt remediation and scale roadmaps.`,
+  },
+  {
+    category: "AI & Data",
     title: "AI / ML Platform Engineer",
-    text: `Join our AI core team building multimodal evaluation pipelines.
+    company: "OpenAI",
+    text: `Join our AI core team building multimodal evaluation pipelines and inference serving infrastructure.
 Requirements:
-- Strong programming skills in Python, PyTorch, NumPy, and modern LLM orchestration.
+- Strong programming skills in Python, PyTorch, CUDA, and modern LLM orchestration.
 - Experience building asynchronous audio processing, speech-to-text (Whisper), and vision pipelines.
 - Knowledge of vector search, embedding models, and deterministic feature extraction.
-- Proven track record of deploying machine learning models into high-throughput production.`,
+- Proven track record of deploying machine learning models into high-throughput production with vLLM/Triton.`,
+  },
+  {
+    category: "AI & Data",
+    title: "Staff Data Platform & Analytics Engineer",
+    company: "Snowflake",
+    text: `Seeking a Staff Data Platform Engineer to design our unified data lakehouse and streaming analytics engine.
+Requirements:
+- Expertise in Apache Spark, Apache Flink, Trino, dbt, and modern lakehouse formats (Iceberg/Delta).
+- Proven ability to optimize petabyte-scale SQL queries, partition strategies, and data governance.
+- Experience with real-time CDC (Change Data Capture) and event-driven data streaming.
+- Strong grounding in data modeling, dimensional schemas, and data quality observability.`,
+  },
+  {
+    category: "SRE & Security",
+    title: "Site Reliability Engineer (SRE) & DevOps Lead",
+    company: "Datadog",
+    text: `Looking for an SRE Lead to own platform availability, observability, and incident lifecycle management.
+Requirements:
+- Deep hands-on experience with Kubernetes, Terraform, AWS/GCP, and Linux kernel fundamentals.
+- Expertise defining SLOs, error budgets, telemetry instrumentation (OpenTelemetry), and automated runbooks.
+- Proven experience leading high-severity incident postmortems and blameless RCA sessions.
+- Strong automation skills in Python, Go, or Rust for platform tooling and self-healing systems.`,
+  },
+  {
+    category: "SRE & Security",
+    title: "Application Security & Zero-Trust Engineer",
+    company: "Cloudflare",
+    text: `Seeking a Security Engineer to lead threat modeling, vulnerability remediation, and identity architecture.
+Requirements:
+- Deep knowledge of OAuth2, OIDC, mTLS, zero-trust network access, and cryptographic protocols.
+- Experience performing automated SAST/DAST scanning, dependency security audits, and penetration testing.
+- Strong background in container isolation, eBPF security, and least-privilege cloud IAM policies.
+- Ability to balance security guardrails with developer agility and product velocity.`,
+  },
+  {
+    category: "Leadership & Product",
+    title: "Engineering Manager (Systems & Platform)",
+    company: "Google",
+    text: `We are looking for an Engineering Manager to lead a high-performing infrastructure and platform team.
+Responsibilities:
+- Manage, coach, and grow a distributed team of 8–12 senior and staff software engineers.
+- Partner with technical product managers to deliver on quarterly roadmaps and high-scale architecture milestones.
+- Foster an inclusive, high-ownership engineering culture with clear accountability and psychological safety.
+- Drive hiring, performance evaluations, technical vision alignment, and cross-functional partnerships.`,
+  },
+  {
+    category: "Leadership & Product",
+    title: "Technical Product Manager (AI & Developer Tools)",
+    company: "GitHub",
+    text: `Join us as a Technical Product Manager driving next-generation developer tooling and AI productivity products.
+Requirements:
+- 4+ years of product management experience with deep technical literacy in APIs, SDKs, and developer workflows.
+- Proven ability to write clear, rigorous PRDs, define North Star metrics, and prioritize competing technical initiatives.
+- Strong user empathy, customer discovery skills, and quantitative telemetry analysis.
+- Experience collaborating closely with staff engineers and executive stakeholders on GTM strategy.`,
   },
 ];
 
@@ -59,6 +148,7 @@ export default function NewInterviewPage() {
   const [jobDescription, setJobDescription] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [company, setCompany] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All Roles");
 
   // Loading & Analyzed State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -72,19 +162,6 @@ export default function NewInterviewPage() {
   const [difficultyLevel, setDifficultyLevel] = useState<string>("medium");
   const [targetDurationMinutes, setTargetDurationMinutes] = useState<number>(10);
   const [questionCount, setQuestionCount] = useState<number>(3);
-  const [recommendedDifficulty, setRecommendedDifficulty] = useState<string | null>(null);
-
-  useEffect(() => {
-    void apiClient
-      .get<LearnerProgress>(`/api/v1/progress?learner_id=${encodeURIComponent(getLearnerId())}`)
-      .then((progress) => {
-        setRecommendedDifficulty(progress.recommended_difficulty);
-        if (progress.sessions_completed > 0) {
-          setDifficultyLevel(progress.recommended_difficulty);
-        }
-      })
-      .catch(() => undefined);
-  }, []);
 
   // Step 1: Analyze Job Description
   const handleAnalyzeJD = async () => {
@@ -125,6 +202,7 @@ export default function NewInterviewPage() {
     setIsCreating(true);
 
     try {
+      const isPanel = interviewType === "panel";
       const payload = {
         job_id: analyzedJob?.id,
         role_profile_id: roleProfile?.id,
@@ -133,7 +211,7 @@ export default function NewInterviewPage() {
         difficulty_level: difficultyLevel,
         target_duration_minutes: targetDurationMinutes,
         question_count: questionCount,
-        learner_id: getLearnerId(),
+        is_panel_mode: isPanel,
       };
 
       const interview = await apiClient.post<InterviewDetail>(
@@ -252,22 +330,71 @@ export default function NewInterviewPage() {
             </div>
 
             {/* Presets */}
-            <div className="mb-4">
-              <label className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2 block">
-                Quick Presets:
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {SAMPLE_JDS.map((preset, idx) => (
+            <div className="mb-6 rounded-2xl border border-white/5 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <label className="text-xs font-bold uppercase tracking-wider text-cyan-300">
+                  Select Target Job Role Preset:
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {SAMPLE_JDS.length} Industry Presets Available
+                </span>
+              </div>
+
+              {/* Category Filter Chips */}
+              <div className="flex flex-wrap gap-1.5 mb-3.5 pb-2 border-b border-white/5">
+                {[
+                  "All Roles",
+                  "Full-Stack & Web",
+                  "Backend & Cloud",
+                  "AI & Data",
+                  "SRE & Security",
+                  "Leadership & Product",
+                ].map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                      selectedCategory === cat
+                        ? "bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 shadow-sm"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Preset Buttons Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {SAMPLE_JDS.filter(
+                  (p) => selectedCategory === "All Roles" || p.category === selectedCategory,
+                ).map((preset, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => {
                       setJobTitle(preset.title);
+                      setCompany(preset.company);
                       setJobDescription(preset.text);
                     }}
-                    className="rounded-lg border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 transition-all hover:border-cyan-500 hover:bg-slate-800 hover:text-cyan-300"
+                    className={`text-left rounded-xl border p-3 transition-all group ${
+                      jobTitle === preset.title
+                        ? "border-cyan-400/50 bg-cyan-950/40 shadow-md shadow-cyan-950/50"
+                        : "border-white/8 bg-white/[0.03] hover:border-cyan-500/30 hover:bg-white/5"
+                    }`}
                   >
-                    + {preset.title}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-300">
+                        {preset.company}
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-500 rounded bg-white/5 px-1 py-0.5">
+                        {preset.category}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs font-bold text-white group-hover:text-cyan-200 transition line-clamp-1">
+                      {preset.title}
+                    </p>
                   </button>
                 ))}
               </div>
@@ -471,9 +598,10 @@ export default function NewInterviewPage() {
                 <label className="text-xs font-medium text-slate-300 mb-2 block">
                   Interview Focus / Type
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: "mixed", label: "Mixed (Tech + STAR)" },
+                    { id: "panel", label: "✨ Dual AI Panel (HR + Tech)" },
                     { id: "technical", label: "Deep Technical" },
                     { id: "behavioral", label: "Behavioral / STAR" },
                   ].map((item) => (
@@ -498,11 +626,6 @@ export default function NewInterviewPage() {
                 <label className="text-xs font-medium text-slate-300 mb-2 block">
                   Target Difficulty
                 </label>
-                {recommendedDifficulty && (
-                  <p className="mb-2 rounded-lg border border-emerald-400/20 bg-emerald-400/5 px-3 py-2 text-[11px] leading-5 text-emerald-200">
-                    Progression engine recommends <span className="font-semibold">{recommendedDifficulty}</span> based on your topic mastery. You can still choose any level.
-                  </p>
-                )}
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: "easy", label: "Standard / Warm-up" },
@@ -573,6 +696,51 @@ export default function NewInterviewPage() {
                 </div>
               </div>
             </div>
+
+            {/* Panel Mode Personas Preview */}
+            {interviewType === "panel" && (
+              <div className="mt-6 rounded-2xl border border-white/10 bg-gradient-to-r from-violet-950/30 via-slate-900/60 to-cyan-950/30 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-300">
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </span>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Active Panel Interviewers
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400 bg-violet-500/20 text-xs font-bold text-violet-200">
+                        SC
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-100">Sarah Chen</h4>
+                        <p className="text-[11px] text-violet-300">HR Lead & People Partner</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Evaluates STAR stories, team ownership, culture fit, and conflict resolution.
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3.5">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400 bg-cyan-500/20 text-xs font-bold text-cyan-200">
+                        AR
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-100">Alex Rivera</h4>
+                        <p className="text-[11px] text-cyan-300">Staff Systems Architect & Tech Lead</p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Evaluates distributed system design, latency trade-offs, and failure recovery.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Launch Action */}
             <div className="mt-8 flex items-center justify-between border-t border-slate-800 pt-6">
