@@ -85,17 +85,30 @@ class Settings(BaseSettings):
         description="Supabase anonymous key for public client operations",
     )
 
-    # ── LLM Provider (Google Gemini Pure Engine) ──────────────
-    llm_provider: Literal["mock", "gemini"] = "mock"
+    # ── LLM Providers (Gemini / Ollama Qwen / Mock) ───────────
+    llm_provider: Literal["mock", "gemini", "qwen", "ollama"] = "mock"
+    interview_llm_provider: Literal["mock", "gemini", "qwen", "ollama"] = "mock"
+    report_llm_provider: Literal["mock", "gemini"] = "mock"
     gemini_api_key: str = Field(default="", description="Google Gemini API key")
     llm_api_key: str = ""
     llm_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = 30.0
     llm_temperature: float = 0.1
 
-    # ── TTS Provider ──────────────────────────────────────────
+    # ── Ollama Local Qwen GGUF Model ──────────────────────────
+    ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama API base URL")
+    ollama_model: str = Field(
+        default="hf.co/mradermacher/interview-assistant-model-GGUF:Q4_K_M",
+        description="Local GGUF interview model identifier in Ollama",
+    )
+
+    # ── TTS Provider (ElevenLabs Streaming Voice Engine) ──────
     tts_provider: Literal["mock", "elevenlabs"] = "mock"
     tts_api_key: str = ""
+    elevenlabs_api_key: str = Field(default="", description="ElevenLabs API key (server-side only)")
+    elevenlabs_model_id: str = Field(default="eleven_flash_v2_5", description="ElevenLabs low-latency voice model")
+    elevenlabs_hr_voice_id: str = Field(default="21m00Tcm4TlvDq8ikWAM", description="Voice ID for Sarah Chen (HR Lead)")
+    elevenlabs_tech_lead_voice_id: str = Field(default="ErXwobaYiN019PkySvjV", description="Voice ID for Alex Rivera (Tech Lead)")
 
     # ── Transcription Provider ────────────────────────────────
     transcription_provider: Literal["mock", "whisper", "whisperx", "deepgram"] = "mock"

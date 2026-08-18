@@ -59,10 +59,121 @@ export default function LiveInterviewRoomPage() {
   const [hasUserStarted, setHasUserStarted] = useState(false);
 
   const spokenQuestionIdsRef = useRef<Set<string>>(new Set());
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Consent Modal State
   const [hasConsent, setHasConsent] = useState<boolean | null>(null);
   const [isConsentModalOpen, setIsConsentModalOpen] = useState(false);
+
+  // Cancel interviewer speech (Barge-in Interruption)
+  const cancelInterviewerSpeech = useCallback(() => {
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current.src = "";
+    }
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, []);
+
+  // Web Speech Fallback helper
+  const speakWithWebSpeech = useCallback(
+    (text: string, persona?: string | null, onComplete?: () => void) => {
+      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+        if (onComplete) onComplete();
+        return;
+      }
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        const isHr = String(persona || "").toUpperCase().includes("HR");
+        utterance.pitch = isHr ? 1.12 : 0.94;
+        utterance.rate = 1.05;
+
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          const preferred = isHr
+            ? voices.find(
+                (v) =>
+                  v.name.includes("Female") ||
+                  v.name.includes("Samantha") ||
+                  v.name.includes("Zira") ||
+                  v.name.includes("Google UK English Female"),
+              )
+            : voices.find(
+                (v) =>
+                  v.name.includes("Male") ||
+                  v.name.includes("David") ||
+                  v.name.includes("Google US English"),
+              );
+          if (preferred) utterance.voice = preferred;
+        }
+
+        utterance.onend = () => {
+          if (onComplete) onComplete();
+        };
+        utterance.onerror = () => {
+          if (onComplete) onComplete();
+        };
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        if (onComplete) onComplete();
+      }
+    },
+    [],
+  );
+
+  // Primary Question Audio Playback (ElevenLabs with WebSpeech fallback)
+  const speakQuestionAudio = useCallback(
+    async (text: string, persona?: string | null, onComplete?: () => void) => {
+      let done = false;
+      const finish = () => {
+        if (!done) {
+          done = true;
+          if (onComplete) onComplete();
+        }
+      };
+
+      try {
+        const isHr = String(persona || "").toUpperCase().includes("HR");
+        const resp = await fetch("/api/v1/tts/synthesize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            persona: isHr ? "friendly_hr" : "skeptical_tech_lead",
+          }),
+        });
+
+        if (resp.ok) {
+          const blob = await resp.blob();
+          if (blob && blob.size > 200) {
+            const url = URL.createObjectURL(blob);
+            if (!audioPlayerRef.current) {
+              audioPlayerRef.current = new Audio();
+            }
+            const audio = audioPlayerRef.current;
+            audio.src = url;
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              finish();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              speakWithWebSpeech(text, persona, finish);
+            };
+            await audio.play();
+            return;
+          }
+        }
+      } catch {
+        // Fallback to browser WebSpeech on network/ElevenLabs error
+      }
+
+      speakWithWebSpeech(text, persona, finish);
+    },
+    [speakWithWebSpeech],
+  );
 
   // Gemini Live Session Hook
   const {
@@ -119,6 +230,7 @@ export default function LiveInterviewRoomPage() {
     enableAudio: true,
     enableVAD: true,
     onSpeechStart: () => {
+      cancelInterviewerSpeech();
       sendEvent("candidate.speaking", { question_id: currentQuestion?.id });
       setConvState("LISTENING");
     },
@@ -176,7 +288,11 @@ export default function LiveInterviewRoomPage() {
     if (saved === null) {
       setIsConsentModalOpen(true);
     } else {
-      setHasConsent(saved === "true");
+      const granted = saved === "true";
+      setHasConsent(granted);
+      if (granted) {
+        setHasUserStarted(true);
+      }
     }
   }, []);
 
@@ -184,49 +300,10 @@ export default function LiveInterviewRoomPage() {
     setHasConsent(granted);
     localStorage.setItem("aptly_recording_consent", String(granted));
     setIsConsentModalOpen(false);
+    if (granted) {
+      setHasUserStarted(true);
+    }
   };
-
-  // Play Question Voice with SpeechSynthesis
-  const speakQuestionAudio = useCallback(
-    (text: string, persona?: string | null, onComplete?: () => void) => {
-      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-        if (onComplete) onComplete();
-        return;
-      }
-
-      try {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        const isHr = String(persona || "").toUpperCase().includes("HR");
-        utterance.pitch = isHr ? 1.12 : 0.94;
-        utterance.rate = 1.05;
-
-        // Try to pick a natural voice if available
-        const voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-          const preferred = isHr
-            ? voices.find((v) => v.name.includes("Female") || v.name.includes("Samantha") || v.name.includes("Zira") || v.name.includes("Google UK English Female"))
-            : voices.find((v) => v.name.includes("Male") || v.name.includes("David") || v.name.includes("Google US English"));
-          if (preferred) {
-            utterance.voice = preferred;
-          }
-        }
-
-        utterance.onend = () => {
-          if (onComplete) onComplete();
-        };
-
-        utterance.onerror = () => {
-          if (onComplete) onComplete();
-        };
-
-        window.speechSynthesis.speak(utterance);
-      } catch {
-        if (onComplete) onComplete();
-      }
-    },
-    [],
-  );
 
   // Conversational Audio Loop: Speak question, then enter LISTENING mode
   useEffect(() => {
@@ -694,49 +771,46 @@ export default function LiveInterviewRoomPage() {
         </div>
 
         {/* Right Column: Candidate Video & Microphone Waveform */}
-        <div className="lg:col-span-6 space-y-6">
-          <Card className="glass-panel p-4 flex flex-col items-center justify-center relative overflow-hidden min-h-[380px]">
-            {/* Live Camera Stream */}
-            <div className="w-full relative aspect-video rounded-xl overflow-hidden bg-slate-950 shadow-inner flex items-center justify-center">
-              <VideoPreview
-                stream={stream}
-                isCameraReady={isCameraReady}
-                isMicReady={isMicReady}
-                isRecording={isRecording}
-                recordedUrl={recordedUrl}
-              />
+        <div className="lg:col-span-6 space-y-4">
+          <div className="relative w-full aspect-video rounded-2xl overflow-hidden shadow-2xl">
+            <VideoPreview
+              stream={stream}
+              isCameraReady={isCameraReady}
+              isMicReady={isMicReady}
+              isRecording={isRecording}
+              recordedUrl={recordedUrl}
+            />
 
-              {/* Speaking Indicator Badge */}
-              {isSpeaking && (
-                <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-mono backdrop-blur-md">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Speaking ({micLevelPercent}%)</span>
-                </div>
-              )}
+            {/* Speaking Indicator Badge */}
+            {isSpeaking && (
+              <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 text-xs font-mono backdrop-blur-md z-40">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Speaking ({micLevelPercent}%)</span>
+              </div>
+            )}
 
-              {/* Timer Pill */}
-              {isRecording && (
-                <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/60 border border-white/10 text-xs font-mono text-white backdrop-blur-md">
-                  <Clock className="h-3.5 w-3.5 text-rose-400" />
-                  <span>
-                    {Math.floor(recordingDuration / 60)}:
-                    {Math.floor(recordingDuration % 60)
-                      .toString()
-                      .padStart(2, "0")}
-                  </span>
-                </div>
-              )}
+            {/* Timer Pill */}
+            {isRecording && (
+              <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/70 border border-white/15 text-xs font-mono text-white backdrop-blur-md z-40">
+                <Clock className="h-3.5 w-3.5 text-rose-400" />
+                <span>
+                  {Math.floor(recordingDuration / 60)}:
+                  {Math.floor(recordingDuration % 60)
+                    .toString()
+                    .padStart(2, "0")}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Microphone Waveform Visualizer */}
+          <Card className="glass-panel p-4 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-xs font-mono text-slate-300">
+              <Mic className={`h-4 w-4 ${isMicReady ? "text-emerald-400" : "text-slate-600"}`} />
+              <span>{isMicReady ? "Microphone Live" : "Mic Off"}</span>
             </div>
-
-            {/* Microphone Waveform Visualizer */}
-            <div className="w-full mt-4 flex items-center justify-between gap-4 px-2">
-              <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                <Mic className={`h-4 w-4 ${isMicReady ? "text-emerald-400" : "text-slate-600"}`} />
-                <span>{isMicReady ? "Microphone Live" : "Mic Off"}</span>
-              </div>
-              <div className="flex-1 max-w-[200px]">
-                <AudioVisualizer isRecording={isRecording} stream={stream} />
-              </div>
+            <div className="flex-1 max-w-[260px]">
+              <AudioVisualizer isRecording={isRecording} stream={stream} />
             </div>
           </Card>
         </div>

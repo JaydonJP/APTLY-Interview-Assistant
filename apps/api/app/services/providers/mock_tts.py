@@ -59,3 +59,7 @@ class MockTTSProvider(TTSProvider):
             duration_seconds=estimated_duration,
             provider=self.PROVIDER_NAME,
         )
+
+    async def stream(self, request: TTSSynthesisRequest):
+        """Stream mock audio chunk."""
+        yield _SILENT_WAV_BYTES
