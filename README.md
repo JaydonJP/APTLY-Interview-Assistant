@@ -928,6 +928,7 @@ The runtime backend is configured for remote Supabase services:
 ~~~text
 DATABASE_URL=postgresql+asyncpg://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
 SUPABASE_URL=https://[PROJECT_REF].supabase.co
+SUPABASE_REST_URL=https://[PROJECT_REF].supabase.co/rest/v1/
 SUPABASE_SERVICE_ROLE_KEY=[server-only-service-role-key]
 STORAGE_PROVIDER=supabase
 STORAGE_BUCKET=aptly-media
@@ -941,7 +942,9 @@ TRANSCRIPTION_PROVIDER=mock
 ~~~
 
 The repository's local apps/api/.env has the Gemini provider selected, but the
-Supabase URL and service-role key must be supplied from your Supabase project
+`SUPABASE_URL` must remain the project root URL because Auth and Storage append
+their own API paths. `SUPABASE_REST_URL` is the explicit PostgREST endpoint.
+The Supabase URL and service-role key must be supplied from your Supabase project
 before the API can start. Do not commit either secret. Apply the schema to the
 same Supabase PostgreSQL database with Alembic before starting the API.
 

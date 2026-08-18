@@ -79,6 +79,10 @@ class Settings(BaseSettings):
         default="",
         description="Supabase project URL e.g. https://[project-ref].supabase.co",
     )
+    supabase_rest_url: str = Field(
+        default="",
+        description="Supabase REST API URL e.g. https://[project-ref].supabase.co/rest/v1/",
+    )
     supabase_service_role_key: str = Field(
         default="",
         description="Supabase service role secret (kept server-side only)",
