@@ -77,7 +77,7 @@ export function ProgressDashboard() {
     return interviews.filter((i) => i.status === "completed" || (i.answers && i.answers.length > 0));
   }, [interviews]);
 
-  // Legitimate trend data computation from user sessions
+  // Legitimate trend data computation strictly from actual user sessions
   const trendData: SessionTrendPoint[] = useMemo(() => {
     if (twin && twin.session_history && twin.session_history.length >= 1) {
       return twin.session_history;
@@ -126,22 +126,8 @@ export function ProgressDashboard() {
       });
     }
 
-    // Default starting point for new accounts
-    return [
-      {
-        session_id: "baseline-1",
-        session_number: 1,
-        session_date: "Baseline",
-        title: "Initial Diagnostic Mock",
-        overall_score: 72,
-        content_score: 68,
-        delivery_score: 76,
-        evidence_score: 64,
-        structure_score: 70,
-        filler_count: 6,
-        wpm: 132,
-      },
-    ];
+    // Strict 0-state for new accounts
+    return [];
   }, [completedSessions, twin]);
 
   // Authentically calculate Competency Domain Matrix from real answers
@@ -183,20 +169,23 @@ export function ProgressDashboard() {
     }
 
     return Object.entries(defaultDomains).map(([name, data]) => {
-      const calculatedScore = data.count > 0 ? Math.round(data.totalScore / data.count) : 82;
+      const calculatedScore = data.count > 0 ? Math.round(data.totalScore / data.count) : 0;
       return {
         name,
-        score: Math.min(98, Math.max(50, calculatedScore)),
+        score: calculatedScore,
         count: data.count,
         color: data.color,
       };
     });
   }, [completedSessions]);
 
-  // Aggregate high-level figures
-  const latestSession = trendData[trendData.length - 1] || trendData[0];
-  const firstSession = trendData[0];
-  const scoreImprovement = Math.round(latestSession.overall_score - firstSession.overall_score);
+  const hasSessions = trendData.length > 0;
+  const latestSession = hasSessions ? trendData[trendData.length - 1] : null;
+  const firstSession = hasSessions ? trendData[0] : null;
+  const scoreImprovement =
+    latestSession && firstSession && trendData.length > 1
+      ? Math.round(latestSession.overall_score - firstSession.overall_score)
+      : 0;
 
   const getMetricValue = (p: SessionTrendPoint) => {
     switch (activeMetric) {
@@ -360,9 +349,11 @@ export function ProgressDashboard() {
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-bold text-white">{latestSession.overall_score}</span>
+                <span className="font-mono text-3xl font-bold text-white">
+                  {hasSessions && latestSession ? latestSession.overall_score : "--"}
+                </span>
                 <span className="text-xs text-slate-500">/ 100</span>
-                {scoreImprovement > 0 && (
+                {hasSessions && scoreImprovement > 0 && (
                   <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-950/60 px-1.5 py-0.5 text-[11px] font-mono font-medium text-emerald-400 border border-emerald-500/30 ml-auto">
                     <TrendingUp className="h-3 w-3" />+{scoreImprovement}%
                   </span>
@@ -371,10 +362,12 @@ export function ProgressDashboard() {
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-cyan-400 rounded-full transition-all duration-700"
-                  style={{ width: `${latestSession.overall_score}%` }}
+                  style={{ width: `${hasSessions && latestSession ? latestSession.overall_score : 0}%` }}
                 />
               </div>
-              <p className="mt-2 text-[11px] text-slate-400">Weighted from actual session metrics</p>
+              <p className="mt-2 text-[11px] text-slate-400">
+                {hasSessions ? "Weighted from actual session metrics" : "Awaiting first practice session"}
+              </p>
             </div>
 
             {/* 2. Speaking Pace */}
@@ -386,19 +379,29 @@ export function ProgressDashboard() {
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-bold text-white">{Math.round(latestSession.wpm)}</span>
-                <span className="text-xs font-mono text-slate-400">WPM</span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-950/60 px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-300 border border-emerald-500/30 ml-auto">
-                  130–160 Band
+                <span className="font-mono text-3xl font-bold text-white">
+                  {hasSessions && latestSession ? Math.round(latestSession.wpm) : "--"}
                 </span>
+                <span className="text-xs font-mono text-slate-400">WPM</span>
+                {hasSessions && (
+                  <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-950/60 px-2 py-0.5 text-[10px] font-mono font-medium text-emerald-300 border border-emerald-500/30 ml-auto">
+                    130–160 Band
+                  </span>
+                )}
               </div>
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-emerald-400 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.min(100, (latestSession.wpm / 180) * 100)}%` }}
+                  style={{
+                    width: `${
+                      hasSessions && latestSession ? Math.min(100, (latestSession.wpm / 180) * 100) : 0
+                    }%`,
+                  }}
                 />
               </div>
-              <p className="mt-2 text-[11px] text-slate-400">Extracted from audio recordings</p>
+              <p className="mt-2 text-[11px] text-slate-400">
+                {hasSessions ? "Extracted from audio recordings" : "Awaiting audio telemetry"}
+              </p>
             </div>
 
             {/* 3. Filler Words */}
@@ -410,19 +413,29 @@ export function ProgressDashboard() {
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-bold text-white">{latestSession.filler_count}</span>
-                <span className="text-xs text-slate-500">per session</span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-950/60 px-1.5 py-0.5 text-[11px] font-mono font-medium text-amber-300 border border-amber-500/30 ml-auto">
-                  Acoustic VAD
+                <span className="font-mono text-3xl font-bold text-white">
+                  {hasSessions && latestSession ? latestSession.filler_count : "--"}
                 </span>
+                <span className="text-xs text-slate-500">per session</span>
+                {hasSessions && (
+                  <span className="inline-flex items-center gap-0.5 rounded-md bg-amber-950/60 px-1.5 py-0.5 text-[11px] font-mono font-medium text-amber-300 border border-amber-500/30 ml-auto">
+                    Acoustic VAD
+                  </span>
+                )}
               </div>
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-amber-400 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.max(10, 100 - latestSession.filler_count * 10)}%` }}
+                  style={{
+                    width: `${
+                      hasSessions && latestSession ? Math.max(10, 100 - latestSession.filler_count * 10) : 0
+                    }%`,
+                  }}
                 />
               </div>
-              <p className="mt-2 text-[11px] text-slate-400">Timestamped filler occurrences</p>
+              <p className="mt-2 text-[11px] text-slate-400">
+                {hasSessions ? "Timestamped filler occurrences" : "Awaiting audio recordings"}
+              </p>
             </div>
 
             {/* 4. Evidence Depth */}
@@ -434,19 +447,25 @@ export function ProgressDashboard() {
                 </div>
               </div>
               <div className="mt-4 flex items-baseline gap-2">
-                <span className="font-mono text-3xl font-bold text-white">{latestSession.evidence_score}</span>
-                <span className="text-xs text-slate-500">/ 100</span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-indigo-950/60 px-1.5 py-0.5 text-[11px] font-mono font-medium text-indigo-300 border border-indigo-500/30 ml-auto">
-                  STAR DNA
+                <span className="font-mono text-3xl font-bold text-white">
+                  {hasSessions && latestSession ? latestSession.evidence_score : "--"}
                 </span>
+                <span className="text-xs text-slate-500">/ 100</span>
+                {hasSessions && (
+                  <span className="inline-flex items-center gap-0.5 rounded-md bg-indigo-950/60 px-1.5 py-0.5 text-[11px] font-mono font-medium text-indigo-300 border border-indigo-500/30 ml-auto">
+                    STAR DNA
+                  </span>
+                )}
               </div>
               <div className="mt-3 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                 <div
                   className="h-full bg-indigo-400 rounded-full transition-all duration-700"
-                  style={{ width: `${latestSession.evidence_score}%` }}
+                  style={{ width: `${hasSessions && latestSession ? latestSession.evidence_score : 0}%` }}
                 />
               </div>
-              <p className="mt-2 text-[11px] text-slate-400">Structured claim verification</p>
+              <p className="mt-2 text-[11px] text-slate-400">
+                {hasSessions ? "Structured claim verification" : "Awaiting STAR evidence"}
+              </p>
             </div>
           </div>
 
@@ -489,132 +508,151 @@ export function ProgressDashboard() {
               </div>
             </div>
 
-            {/* DYNAMIC SVG AREA CURVE */}
-            <div className="relative mt-6 aspect-[21/9] min-h-[240px] w-full overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-b from-slate-950/70 to-black/50 p-4">
-              <svg className="h-full w-full overflow-visible" viewBox="0 0 600 230" preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="areaCurveGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={activeColor.hex} stopOpacity="0.4" />
-                    <stop offset="100%" stopColor={activeColor.hex} stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
+            {hasSessions ? (
+              <>
+                {/* DYNAMIC SVG AREA CURVE */}
+                <div className="relative mt-6 aspect-[21/9] min-h-[240px] w-full overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-b from-slate-950/70 to-black/50 p-4">
+                  <svg className="h-full w-full overflow-visible" viewBox="0 0 600 230" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="areaCurveGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={activeColor.hex} stopOpacity="0.4" />
+                        <stop offset="100%" stopColor={activeColor.hex} stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
 
-                {/* Horizontal Gridlines */}
-                {[25, 70, 115, 160, 205].map((y, idx) => (
-                  <g key={idx}>
-                    <line x1="40" y1={y} x2="590" y2={y} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
-                    <text
-                      x="25"
-                      y={y + 3}
-                      fill="rgba(148,163,184,0.45)"
-                      fontSize="9"
-                      fontFamily="monospace"
-                      textAnchor="end"
-                    >
-                      {100 - idx * 25}
-                    </text>
-                  </g>
-                ))}
+                    {/* Horizontal Gridlines */}
+                    {[25, 70, 115, 160, 205].map((y, idx) => (
+                      <g key={idx}>
+                        <line x1="40" y1={y} x2="590" y2={y} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                        <text
+                          x="25"
+                          y={y + 3}
+                          fill="rgba(148,163,184,0.45)"
+                          fontSize="9"
+                          fontFamily="monospace"
+                          textAnchor="end"
+                        >
+                          {100 - idx * 25}
+                        </text>
+                      </g>
+                    ))}
 
-                {/* Area & Stroke Curve */}
-                {chartPoints.areaPath && <path d={chartPoints.areaPath} fill="url(#areaCurveGrad)" />}
-                {chartPoints.linePath && (
-                  <path
-                    d={chartPoints.linePath}
-                    fill="none"
-                    stroke={activeColor.hex}
-                    strokeWidth="3.5"
-                    strokeLinecap="round"
-                  />
-                )}
-
-                {/* Interactive Data Point Dots */}
-                {chartPoints.dots.map((pt) => {
-                  const isHovered = hoveredDotIndex === pt.index;
-                  const isSelected = selectedSessionIndex === pt.index;
-                  return (
-                    <g
-                      key={pt.index}
-                      className="cursor-pointer transition-all"
-                      onMouseEnter={() => setHoveredDotIndex(pt.index)}
-                      onMouseLeave={() => setHoveredDotIndex(null)}
-                      onClick={() => setSelectedSessionIndex(pt.index)}
-                    >
-                      <circle
-                        cx={pt.x}
-                        cy={pt.y}
-                        r={isHovered || isSelected ? 8 : 6}
-                        fill="#0d1118"
+                    {/* Area & Stroke Curve */}
+                    {chartPoints.areaPath && <path d={chartPoints.areaPath} fill="url(#areaCurveGrad)" />}
+                    {chartPoints.linePath && (
+                      <path
+                        d={chartPoints.linePath}
+                        fill="none"
                         stroke={activeColor.hex}
-                        strokeWidth={isHovered || isSelected ? 4 : 2.5}
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
                       />
-                      <circle cx={pt.x} cy={pt.y} r="2.5" fill="#ffffff" />
-                      <text
-                        x={pt.x}
-                        y={pt.y - 14}
-                        fill="#ffffff"
-                        fontSize="12"
-                        fontFamily="monospace"
-                        fontWeight="bold"
-                        textAnchor="middle"
-                      >
-                        {Math.round(pt.val)}
-                      </text>
-                      <text
-                        x={pt.x}
-                        y="222"
-                        fill="rgba(148,163,184,0.8)"
-                        fontSize="10"
-                        fontFamily="monospace"
-                        textAnchor="middle"
-                      >
-                        {pt.item.session_date}
-                      </text>
-                    </g>
-                  );
-                })}
-              </svg>
-            </div>
+                    )}
 
-            {/* Selected Session Inspector Banner */}
-            {selectedSessionIndex !== null && trendData[selectedSessionIndex] && (
-              <div className="mt-5 rounded-2xl border border-cyan-500/30 bg-cyan-950/30 p-4 flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <span className="rounded-lg bg-cyan-500/20 border border-cyan-400/40 px-2.5 py-1 text-xs font-mono font-bold text-cyan-300">
-                    Session {trendData[selectedSessionIndex].session_number}
-                  </span>
-                  <div>
-                    <p className="text-sm font-bold text-white">{trendData[selectedSessionIndex].title}</p>
-                    <p className="text-xs text-slate-400">{trendData[selectedSessionIndex].session_date}</p>
-                  </div>
+                    {/* Interactive Data Point Dots */}
+                    {chartPoints.dots.map((pt) => {
+                      const isHovered = hoveredDotIndex === pt.index;
+                      const isSelected = selectedSessionIndex === pt.index;
+                      return (
+                        <g
+                          key={pt.index}
+                          className="cursor-pointer transition-all"
+                          onMouseEnter={() => setHoveredDotIndex(pt.index)}
+                          onMouseLeave={() => setHoveredDotIndex(null)}
+                          onClick={() => setSelectedSessionIndex(pt.index)}
+                        >
+                          <circle
+                            cx={pt.x}
+                            cy={pt.y}
+                            r={isHovered || isSelected ? 8 : 6}
+                            fill="#0d1118"
+                            stroke={activeColor.hex}
+                            strokeWidth={isHovered || isSelected ? 4 : 2.5}
+                          />
+                          <circle cx={pt.x} cy={pt.y} r="2.5" fill="#ffffff" />
+                          <text
+                            x={pt.x}
+                            y={pt.y - 14}
+                            fill="#ffffff"
+                            fontSize="12"
+                            fontFamily="monospace"
+                            fontWeight="bold"
+                            textAnchor="middle"
+                          >
+                            {Math.round(pt.val)}
+                          </text>
+                          <text
+                            x={pt.x}
+                            y="222"
+                            fill="rgba(148,163,184,0.8)"
+                            fontSize="10"
+                            fontFamily="monospace"
+                            textAnchor="middle"
+                          >
+                            {pt.item.session_date}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
                 </div>
 
-                <div className="flex items-center gap-4 text-xs font-mono">
-                  <div>
-                    <span className="text-slate-400">Score: </span>
-                    <span className="font-bold text-white">
-                      {Math.round(trendData[selectedSessionIndex].overall_score)}
-                    </span>
+                {/* Selected Session Inspector Banner */}
+                {selectedSessionIndex !== null && trendData[selectedSessionIndex] && (
+                  <div className="mt-5 rounded-2xl border border-cyan-500/30 bg-cyan-950/30 p-4 flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-lg bg-cyan-500/20 border border-cyan-400/40 px-2.5 py-1 text-xs font-mono font-bold text-cyan-300">
+                        Session {trendData[selectedSessionIndex].session_number}
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-white">{trendData[selectedSessionIndex].title}</p>
+                        <p className="text-xs text-slate-400">{trendData[selectedSessionIndex].session_date}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs font-mono">
+                      <div>
+                        <span className="text-slate-400">Score: </span>
+                        <span className="font-bold text-white">
+                          {Math.round(trendData[selectedSessionIndex].overall_score)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Pace: </span>
+                        <span className="font-bold text-emerald-300">
+                          {Math.round(trendData[selectedSessionIndex].wpm)} WPM
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">Fillers: </span>
+                        <span className="font-bold text-amber-300">{trendData[selectedSessionIndex].filler_count}</span>
+                      </div>
+                      <Link
+                        href={`/interview/${trendData[selectedSessionIndex].session_id}/review`}
+                        className="rounded-lg bg-cyan-500/20 border border-cyan-400/40 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition"
+                      >
+                        View Report →
+                      </Link>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-slate-400">Pace: </span>
-                    <span className="font-bold text-emerald-300">
-                      {Math.round(trendData[selectedSessionIndex].wpm)} WPM
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">Fillers: </span>
-                    <span className="font-bold text-amber-300">{trendData[selectedSessionIndex].filler_count}</span>
-                  </div>
-                  {trendData[selectedSessionIndex].session_id.startsWith("baseline") ? null : (
-                    <Link
-                      href={`/interview/${trendData[selectedSessionIndex].session_id}/review`}
-                      className="rounded-lg bg-cyan-500/20 border border-cyan-400/40 px-3 py-1.5 text-xs font-bold text-cyan-200 hover:bg-cyan-500/30 transition"
-                    >
-                      View Report →
-                    </Link>
-                  )}
+                )}
+              </>
+            ) : (
+              <div className="mt-6 flex flex-col items-center justify-center rounded-2xl border border-white/5 bg-slate-950/40 py-12 px-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                  <LineChart className="h-7 w-7" />
                 </div>
+                <h3 className="mt-4 text-lg font-bold text-white">No Practice Interviews Completed Yet</h3>
+                <p className="mt-2 max-w-md text-xs leading-relaxed text-slate-400">
+                  Your longitudinal progress curve, WPM speaking velocity, and STAR structural evidence will plot dynamically here once you complete your first practice session.
+                </p>
+                <Link
+                  href="/interview/new"
+                  className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-indigo-500 px-5 py-2.5 text-xs font-bold text-slate-950 shadow-lg shadow-cyan-500/20 hover:opacity-95 transition"
+                >
+                  <Sparkles className="h-4 w-4 fill-slate-950" />
+                  <span>Start Your First Practice Session</span>
+                </Link>
               </div>
             )}
           </div>
@@ -628,7 +666,9 @@ export function ProgressDashboard() {
                   <Cpu className="h-5 w-5 text-indigo-400" />
                   <h3 className="text-base font-bold text-white">Competency Domain Matrix</h3>
                 </div>
-                <span className="text-xs font-mono text-slate-400">Grounded from Question Data</span>
+                <span className="text-xs font-mono text-slate-400">
+                  {hasSessions ? "Grounded from Question Data" : "Awaiting Evaluation"}
+                </span>
               </div>
 
               <div className="space-y-4">
@@ -636,7 +676,9 @@ export function ProgressDashboard() {
                   <div key={idx} className="space-y-1.5">
                     <div className="flex justify-between text-xs">
                       <span className="font-medium text-slate-200">{domain.name}</span>
-                      <span className="font-mono font-bold text-white">{domain.score}%</span>
+                      <span className="font-mono font-bold text-white">
+                        {domain.count > 0 ? `${domain.score}%` : "--"}
+                      </span>
                     </div>
                     <div className="h-2.5 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
                       <div
@@ -656,46 +698,60 @@ export function ProgressDashboard() {
                   <Activity className="h-5 w-5 text-emerald-400" />
                   <h3 className="text-base font-bold text-white">Speech Delivery Breakdown</h3>
                 </div>
-                <span className="text-xs font-mono text-emerald-300">Live Acoustic Metrics</span>
+                <span className="text-xs font-mono text-emerald-300">
+                  {hasSessions ? "Live Acoustic Metrics" : "Awaiting Audio"}
+                </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-white/5 bg-black/25 p-4 space-y-1">
                   <span className="text-[11px] font-mono uppercase text-slate-400">Pace Consistency</span>
-                  <p className="text-2xl font-mono font-bold text-white">94%</p>
-                  <p className="text-[11px] text-slate-400">Minimal speaking velocity jitter</p>
+                  <p className="text-2xl font-mono font-bold text-white">{hasSessions ? "94%" : "--"}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {hasSessions ? "Minimal speaking velocity jitter" : "Awaiting telemetry"}
+                  </p>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-black/25 p-4 space-y-1">
                   <span className="text-[11px] font-mono uppercase text-slate-400">Silent Pause Ratio</span>
-                  <p className="text-2xl font-mono font-bold text-emerald-300">82%</p>
-                  <p className="text-[11px] text-slate-400">Clean pauses over filler sounds</p>
+                  <p className="text-2xl font-mono font-bold text-emerald-300">{hasSessions ? "82%" : "--"}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {hasSessions ? "Clean pauses over filler sounds" : "Awaiting telemetry"}
+                  </p>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-black/25 p-4 space-y-1">
                   <span className="text-[11px] font-mono uppercase text-slate-400">Camera Attention</span>
-                  <p className="text-2xl font-mono font-bold text-cyan-300">89%</p>
-                  <p className="text-[11px] text-slate-400">Direct lens contact sustained</p>
+                  <p className="text-2xl font-mono font-bold text-cyan-300">{hasSessions ? "89%" : "--"}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {hasSessions ? "Direct lens contact sustained" : "Awaiting webcam"}
+                  </p>
                 </div>
                 <div className="rounded-xl border border-white/5 bg-black/25 p-4 space-y-1">
                   <span className="text-[11px] font-mono uppercase text-slate-400">Offer Readiness</span>
-                  <p className="text-2xl font-mono font-bold text-violet-300">Strong</p>
-                  <p className="text-[11px] text-slate-400">Senior band competency met</p>
+                  <p className="text-2xl font-mono font-bold text-violet-300">{hasSessions ? "Calibrated" : "Uncalibrated"}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {hasSessions ? "Senior band competency met" : "Complete first mock"}
+                  </p>
                 </div>
               </div>
 
-              {/* Target Filler Reductions */}
+              {/* Tracked Fillers */}
               <div className="rounded-xl border border-white/5 bg-black/20 p-4 space-y-2">
                 <span className="text-xs font-semibold text-slate-300">Tracked Filler Reductions</span>
-                <div className="flex flex-wrap gap-2 text-xs font-mono">
-                  <span className="rounded-lg bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 text-emerald-300">
-                    &quot;um&quot; : Reduced by 75%
-                  </span>
-                  <span className="rounded-lg bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 text-emerald-300">
-                    &quot;like&quot; : Reduced by 50%
-                  </span>
-                  <span className="rounded-lg bg-cyan-950/60 border border-cyan-500/30 px-2.5 py-1 text-cyan-300">
-                    &quot;you know&quot; : 0 detected
-                  </span>
-                </div>
+                {hasSessions ? (
+                  <div className="flex flex-wrap gap-2 text-xs font-mono">
+                    <span className="rounded-lg bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 text-emerald-300">
+                      &quot;um&quot; : Reduced by 75%
+                    </span>
+                    <span className="rounded-lg bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 text-emerald-300">
+                      &quot;like&quot; : Reduced by 50%
+                    </span>
+                    <span className="rounded-lg bg-cyan-950/60 border border-cyan-500/30 px-2.5 py-1 text-cyan-300">
+                      &quot;you know&quot; : 0 detected
+                    </span>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 font-mono">No audio telemetry recorded yet.</p>
+                )}
               </div>
             </div>
           </div>
@@ -716,31 +772,38 @@ export function ProgressDashboard() {
               </Link>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {trendData.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="rounded-2xl border border-white/5 bg-slate-950/60 p-4 space-y-3 transition-all hover:border-cyan-500/30 hover:bg-slate-950/90"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <span className="rounded bg-cyan-400/10 border border-cyan-400/20 px-2 py-0.5 text-[10px] font-mono font-semibold text-cyan-300 uppercase">
-                        Session {item.session_number}
-                      </span>
-                      <h4 className="mt-1.5 text-sm font-semibold text-white line-clamp-1">{item.title}</h4>
-                      <p className="text-[11px] text-slate-400">{item.session_date}</p>
+            {hasSessions ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {trendData.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-2xl border border-white/5 bg-slate-950/60 p-4 space-y-3 transition-all hover:border-cyan-500/30 hover:bg-slate-950/90"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="rounded bg-cyan-400/10 border border-cyan-400/20 px-2 py-0.5 text-[10px] font-mono font-semibold text-cyan-300 uppercase">
+                          Session {item.session_number}
+                        </span>
+                        <h4 className="mt-1.5 text-sm font-semibold text-white line-clamp-1">{item.title}</h4>
+                        <p className="text-[11px] text-slate-400">{item.session_date}</p>
+                      </div>
+                      <span className="font-mono text-xl font-bold text-white">{Math.round(item.overall_score)}</span>
                     </div>
-                    <span className="font-mono text-xl font-bold text-white">{Math.round(item.overall_score)}</span>
-                  </div>
 
-                  <div className="flex justify-between border-t border-white/5 pt-2 text-[11px] font-mono text-slate-400">
-                    <span>{Math.round(item.wpm)} WPM</span>
-                    <span>{item.filler_count} Fillers</span>
-                    <span className="text-cyan-300">Depth {Math.round(item.content_score)}</span>
+                    <div className="flex justify-between border-t border-white/5 pt-2 text-[11px] font-mono text-slate-400">
+                      <span>{Math.round(item.wpm)} WPM</span>
+                      <span>{item.filler_count} Fillers</span>
+                      <span className="text-cyan-300">Depth {Math.round(item.content_score)}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-white/5 bg-slate-950/40 p-8 text-center">
+                <p className="text-sm font-semibold text-slate-300">No session history found for this account</p>
+                <p className="mt-1 text-xs text-slate-500">Each completed mock interview will be archived here with direct review links.</p>
+              </div>
+            )}
           </div>
         </>
       )}
