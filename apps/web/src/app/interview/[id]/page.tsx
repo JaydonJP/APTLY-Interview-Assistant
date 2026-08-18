@@ -11,7 +11,7 @@ import { RecordingConsentModal } from "@/components/interview/RecordingConsentMo
 import { PanelInterviewerDeck } from "@/components/panel/PanelInterviewerDeck";
 import { useMediaCapture } from "@/hooks/useMediaCapture";
 import { useInterviewWebSocket } from "@/hooks/useInterviewWebSocket";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, getApiBaseUrl } from "@/lib/api-client";
 import type { Answer, InterviewDetail, Question } from "@/types/interview";
 import {
   AlertTriangle,
@@ -57,6 +57,9 @@ export default function LiveInterviewRoomPage() {
   const [convState, setConvState] = useState<ConversationalState>("IDLE");
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [hasUserStarted, setHasUserStarted] = useState(false);
+  const [doubt, setDoubt] = useState("");
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
 
   const spokenQuestionIdsRef = useRef<Set<string>>(new Set());
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
@@ -136,7 +139,7 @@ export default function LiveInterviewRoomPage() {
 
       try {
         const isHr = String(persona || "").toUpperCase().includes("HR");
-        const resp = await fetch("/api/v1/tts/synthesize", {
+        const resp = await fetch(`${getApiBaseUrl()}/api/v1/tts/synthesize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -224,8 +227,10 @@ export default function LiveInterviewRoomPage() {
     error: mediaError,
     startRecording,
     stopRecording,
+    visionMetrics,
     resetRecording,
   } = useMediaCapture({
+    captureEnabled: hasConsent === true,
     enableVideo: true,
     enableAudio: true,
     enableVAD: true,
@@ -290,9 +295,9 @@ export default function LiveInterviewRoomPage() {
     } else {
       const granted = saved === "true";
       setHasConsent(granted);
-      if (granted) {
-        setHasUserStarted(true);
-      }
+      // Consent is not the same as a user gesture. Keep the explicit start
+      // step so device readiness and interviewer narration are sequenced.
+      setHasUserStarted(false);
     }
   }, []);
 
@@ -301,13 +306,15 @@ export default function LiveInterviewRoomPage() {
     localStorage.setItem("aptly_recording_consent", String(granted));
     setIsConsentModalOpen(false);
     if (granted) {
-      setHasUserStarted(true);
+      setHasUserStarted(false);
     }
   };
 
   // Conversational Audio Loop: Speak question, then enter LISTENING mode
   useEffect(() => {
-    if (!hasConsent || !currentQuestion || isLoading || isSubmitting || !hasUserStarted) return;
+    // The first interviewer turn is gated on a live microphone and camera so
+    // the user gets a truthful readiness check before narration begins.
+    if (!hasConsent || !currentQuestion || isLoading || isSubmitting || !hasUserStarted || !isMicReady || !isCameraReady) return;
     const qId = currentQuestion.id;
 
     if (spokenQuestionIdsRef.current.has(qId) || currentAnswer) {
@@ -353,10 +360,14 @@ export default function LiveInterviewRoomPage() {
     } else {
       beginListening();
     }
-  }, [currentQuestion, hasConsent, isLoading, isSubmitting, currentAnswer, voiceEnabled, hasUserStarted, startRecording, speakQuestionAudio, convState]);
+  }, [currentQuestion, hasConsent, isLoading, isSubmitting, currentAnswer, voiceEnabled, hasUserStarted, isMicReady, isCameraReady, startRecording, speakQuestionAudio, convState]);
 
   // Start Session manually (unlocks browser audio gesture)
   const handleStartSession = () => {
+    if (!isMicReady || !isCameraReady) {
+      setErrorMessage("Checking your microphone and camera. Start becomes available when both are ready.");
+      return;
+    }
     setHasUserStarted(true);
     if (currentQuestion) {
       setConvState("INTERVIEWER_SPEAKING");
@@ -388,6 +399,26 @@ export default function LiveInterviewRoomPage() {
         }
       },
     );
+  };
+
+  const handleExplainQuestion = async () => {
+    if (!currentQuestion || !doubt.trim() || isExplaining) return;
+    setIsExplaining(true);
+    setExplanation(null);
+    try {
+      const result = await apiClient.post<{ answer: string }>(
+        `/api/v1/interviews/${interviewId}/questions/${currentQuestion.id}/explain`,
+        { doubt: doubt.trim() },
+      );
+      setExplanation(result.answer);
+      if (voiceEnabled) {
+        speakQuestionAudio(result.answer, currentQuestion.interviewer_persona);
+      }
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : "The interviewer could not explain that yet.");
+    } finally {
+      setIsExplaining(false);
+    }
   };
 
   // Jump straight to answering
@@ -446,6 +477,7 @@ export default function LiveInterviewRoomPage() {
       if (finalTranscript.length > 0) {
         formData.append("transcript_text", finalTranscript);
       }
+      formData.append("vision_metrics_json", JSON.stringify(visionMetrics));
 
       setConvState("THINKING");
       sendEvent("interview.thinking", { question_id: currentQuestion.id });
@@ -623,17 +655,26 @@ export default function LiveInterviewRoomPage() {
             </div>
             <div>
               <h3 className="text-base font-bold text-white">Ready for your practice interview?</h3>
-              <p className="text-xs text-slate-300">Click start to hear the interviewer speak the first question aloud and begin.</p>
+              <p className="text-xs text-slate-300">We’ll check your devices, play the interviewer’s question, then open your answer turn.</p>
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-mono">
+                <span className={`rounded-full border px-2 py-1 ${isMicReady ? "border-emerald-400/30 bg-emerald-950/30 text-emerald-300" : "border-amber-400/30 bg-amber-950/30 text-amber-300"}`}>
+                  Mic {isMicReady ? "ready" : "checking"}
+                </span>
+                <span className={`rounded-full border px-2 py-1 ${isCameraReady ? "border-emerald-400/30 bg-emerald-950/30 text-emerald-300" : "border-amber-400/30 bg-amber-950/30 text-amber-300"}`}>
+                  Camera {isCameraReady ? "ready" : "checking"}
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={handleStartSession}
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-400 transition"
+              disabled={!isMicReady || !isCameraReady}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-500 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-indigo-400 transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Play className="h-4 w-4 fill-white" />
-              <span>Start Interview (Hear Question)</span>
+              <span>{isMicReady && isCameraReady ? "Start Interview (Hear Question)" : "Preparing devices…"}</span>
             </button>
           </div>
         </div>
@@ -746,6 +787,40 @@ export default function LiveInterviewRoomPage() {
                     <Mic className="h-3.5 w-3.5 text-emerald-400" />
                     <span>Skip to Answer</span>
                   </button>
+                )}
+              </div>
+
+              {/* Candidate clarification loop: real interviewers explain the
+                  prompt, then let the candidate continue without losing the turn. */}
+              <div className="mt-5 rounded-xl border border-indigo-500/25 bg-indigo-950/20 p-3.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-indigo-200">Need a clarification?</span>
+                  <span className="text-[11px] text-slate-500">You can ask before answering</span>
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={doubt}
+                    onChange={(event) => setDoubt(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void handleExplainQuestion();
+                    }}
+                    placeholder="e.g. What trade-off should I focus on?"
+                    className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/70 px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-400"
+                    disabled={isExplaining}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleExplainQuestion()}
+                    disabled={isExplaining || !doubt.trim()}
+                    className="rounded-lg bg-indigo-500/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isExplaining ? "Explaining…" : "Explain"}
+                  </button>
+                </div>
+                {explanation && (
+                  <p className="mt-3 rounded-lg border border-indigo-400/20 bg-slate-950/50 p-3 text-xs leading-relaxed text-slate-200">
+                    {explanation}
+                  </p>
                 )}
               </div>
             </div>

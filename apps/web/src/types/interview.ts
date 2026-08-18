@@ -128,7 +128,48 @@ export interface Transcript {
   words: TranscriptWord[];
   model_provider: string;
   model_version: string;
+  quality_score: number;
+  provider_confidence: number;
+  source_agreement_score?: number | null;
+  quality_label: "high" | "review" | "low" | string;
+  quality_notes: string;
   created_at: string;
+}
+
+export interface VisionFrameEvent {
+  timestamp_seconds: number;
+  face_count: number;
+  face_x: number;
+  face_y: number;
+  face_width: number;
+  face_height: number;
+  eye_contact: boolean;
+  confidence: number;
+  expressionSignal?: "neutral" | "engaged" | "strained" | "unavailable";
+  expressionConfidence?: number;
+}
+
+export interface VisionMetrics {
+  id?: string;
+  answer_id?: string;
+  provider: string;
+  model_version: string;
+  capability_status: "ready" | "partial" | "unavailable" | string;
+  frame_count: number;
+  valid_frame_count: number;
+  analysis_duration_seconds: number;
+  face_detected_ratio?: number | null;
+  multiple_people_ratio?: number | null;
+  eye_contact_ratio?: number | null;
+  face_centering_score?: number | null;
+  tracking_confidence?: number | null;
+  visual_communication_score?: number | null;
+  expression_signal: "neutral" | "engaged" | "strained" | "unavailable" | string;
+  expression_confidence?: number | null;
+  face_presence_events: VisionFrameEvent[];
+  strengths: string[];
+  improvements: string[];
+  created_at?: string;
 }
 
 export interface StarComponent {
@@ -186,6 +227,11 @@ export interface ContentMetrics {
   structure_score: number;
   evidence_score: number;
   overall_content_score: number;
+  correctness_status: "correct" | "partially_correct" | "incorrect" | "not_enough_evidence" | string;
+  correctness_score: number;
+  correctness_summary: string;
+  topic_coverage: TopicCoverage[];
+  ideal_answer_outline: string[];
   strengths: string[];
   weaknesses: string[];
   star_analysis?: StarAnalysis | null;
@@ -200,6 +246,15 @@ export interface ContentMetrics {
   created_at: string;
 }
 
+export interface TopicCoverage {
+  topic: string;
+  covered: boolean;
+  score: number;
+  evidence_quote?: string | null;
+  explanation: string;
+  importance: string;
+}
+
 export interface Answer {
   id: string;
   interview_id: string;
@@ -210,10 +265,15 @@ export interface Answer {
   started_at?: string | null;
   ended_at?: string | null;
   audio_storage_key?: string | null;
+  video_storage_key?: string | null;
   audio_size_bytes?: number | null;
+  video_size_bytes?: number | null;
+  media_content_type?: string | null;
+  media_has_video?: boolean;
   transcript?: Transcript | null;
   speech_metrics?: SpeechMetrics | null;
   content_metrics?: ContentMetrics | null;
+  vision_metrics?: VisionMetrics | null;
   created_at: string;
 }
 
@@ -240,6 +300,7 @@ export interface QuestionReviewItem {
   transcript?: Transcript | null;
   speech_metrics?: SpeechMetrics | null;
   content_metrics?: ContentMetrics | null;
+  vision_metrics?: VisionMetrics | null;
 }
 
 export interface InterviewReview {
@@ -266,6 +327,8 @@ export interface InterviewReview {
   average_content_score?: number;
   average_relevance_score?: number;
   average_technical_depth_score?: number;
+  average_correctness_score?: number;
+  average_visual_communication_score?: number | null;
   questions_review: QuestionReviewItem[];
   report_card?: InterviewReportCard | null;
   panel_report?: PanelInterviewReport | null;
@@ -336,7 +399,13 @@ export interface PrivacyNote {
 export interface InterviewReportCard {
   overall_score: number;
   content_score: number;
+  correctness_score: number;
+  correctness_label: string;
   delivery_score: number;
+  visual_communication_score?: number | null;
+  multimodal_score?: number | null;
+  visual_strengths: string[];
+  visual_improvements: string[];
   confidence_label: string;
   strengths: string[];
   top_habits: ReportHabit[];

@@ -28,6 +28,7 @@ from app.schemas.content_intelligence import (
     QuestionType,
     StarAnalysis,
     StarComponent,
+    TopicCoverage,
 )
 from app.services.content_intelligence.rubrics import (
     SYSTEM_EVALUATOR_PROMPT,
@@ -69,6 +70,7 @@ class ContentAnalysisService:
         self,
         question_type: QuestionType,
         transcript: str,
+        expected_topics: list[str] | None = None,
     ) -> ContentAnalysisResult:
         """Return clear, non-hallucinated feedback for empty or one-word answers."""
         is_empty = not transcript.strip()
@@ -97,7 +99,17 @@ class ContentAnalysisService:
                 if is_empty
                 else "The answer was too short to verify the key ideas required by the question."
             ),
-            topic_coverage=[],
+            topic_coverage=[
+                TopicCoverage(
+                    topic=topic,
+                    covered=False,
+                    score=0.0,
+                    explanation="The answer did not contain enough evidence to assess this topic.",
+                    importance="core",
+                )
+                for topic in (expected_topics or [])
+                if topic.strip()
+            ],
             ideal_answer_outline=[
                 "State the direct answer first.",
                 "Explain the mechanism or reasoning.",
@@ -157,7 +169,11 @@ class ContentAnalysisService:
                 words_count=words_count,
                 transcript=input_data.full_transcript[:40],
             )
-            return self._handle_short_or_empty_answer(q_type, input_data.full_transcript)
+            return self._handle_short_or_empty_answer(
+                q_type,
+                input_data.full_transcript,
+                input_data.expected_topics,
+            )
 
         # 2. Build prompt
         prompt = build_evaluation_prompt(
@@ -215,6 +231,35 @@ class ContentAnalysisService:
             structure_score=round(base_score * 0.92, 1),
             evidence_score=round(base_score * 0.85, 1),
             overall_content_score=round(base_score * 0.92, 1),
+            correctness_status=(
+                AnswerCorrectness.CORRECT
+                if base_score >= 72
+                else AnswerCorrectness.PARTIALLY_CORRECT
+            ),
+            correctness_score=round(base_score * 0.9, 1),
+            correctness_summary=(
+                "The answer addressed the main idea, but a stronger response would make the mechanism and trade-offs explicit."
+            ),
+            topic_coverage=[
+                TopicCoverage(
+                    topic=topic,
+                    covered=topic.lower() in input_data.full_transcript.lower(),
+                    score=70.0 if topic.lower() in input_data.full_transcript.lower() else 25.0,
+                    explanation=(
+                        "The transcript references this topic."
+                        if topic.lower() in input_data.full_transcript.lower()
+                        else "The transcript did not provide clear evidence for this expected topic."
+                    ),
+                    importance="core",
+                )
+                for topic in input_data.expected_topics
+                if topic.strip()
+            ],
+            ideal_answer_outline=[
+                "State the direct answer and define the main concept.",
+                "Explain the mechanism, assumptions, and trade-offs.",
+                "Close with a concrete example or measurable result.",
+            ],
             strengths=[
                 "Articulated relevant technical concepts and engineering domain terminology.",
                 "Directly addressed the question prompt with consistent delivery flow.",

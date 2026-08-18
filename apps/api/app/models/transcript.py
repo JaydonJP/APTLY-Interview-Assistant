@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDMixin
@@ -49,6 +49,14 @@ class Transcript(UUIDMixin, TimestampMixin, Base):
     model_version: Mapped[str] = mapped_column(
         String(100), nullable=False, default="mock-v1.0"
     )
+    # Quality is a measured confidence signal, not a claim that the transcript
+    # is perfectly accurate. It is populated from provider word confidence and
+    # agreement with the browser's provisional transcript when available.
+    quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    provider_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    source_agreement_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quality_label: Mapped[str] = mapped_column(String(20), nullable=False, default="low")
+    quality_notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     schema_version: Mapped[str] = mapped_column(
         String(20), nullable=False, default="1.0"
     )

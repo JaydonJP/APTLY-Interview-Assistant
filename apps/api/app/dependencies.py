@@ -88,7 +88,11 @@ async def get_db(
     The session is automatically committed on success
     and rolled back on exception.
     """
-    session_factory = get_session_factory(settings.database_url)
+    # Keep configuration validation explicit while allowing the API to boot in
+    # a no-database development shell. Feature-gated endpoints can still return
+    # their safe fallback without attempting a database query.
+    database_url = settings.database_url or "sqlite+aiosqlite:///./aptly.db"
+    session_factory = get_session_factory(database_url)
     async with session_factory() as session:
         try:
             yield session
@@ -114,6 +118,9 @@ def _get_storage_provider_instance(
         logger.info("storage_provider_init", provider="local", endpoint=endpoint)
         return LocalStorageProvider(root_dir=endpoint)
     if provider == "supabase":
+        if not supabase_url or not supabase_service_role_key:
+            logger.warning("storage_provider_fallback", reason="Supabase credentials missing, falling back to local storage", endpoint=endpoint)
+            return LocalStorageProvider(root_dir=endpoint)
         from app.services.storage.supabase import SupabaseStorageProvider
 
         logger.info("storage_provider_init", provider="supabase", bucket=bucket_name)
@@ -215,6 +222,9 @@ def _get_tts_provider_instance(
     model_id: str = "eleven_flash_v2_5",
     hr_voice_id: str = "21m00Tcm4TlvDq8ikWAM",
     tech_lead_voice_id: str = "ErXwobaYiN019PkySvjV",
+    gemini_model: str = "gemini-3.1-flash-tts-preview",
+    gemini_voice: str = "Kore",
+    timeout_seconds: float = 30.0,
 ) -> TTSProvider:
     """Create and cache the TTS provider (singleton)."""
     if provider == "mock":
@@ -230,6 +240,19 @@ def _get_tts_provider_instance(
             hr_voice_id=hr_voice_id,
             tech_lead_voice_id=tech_lead_voice_id,
         )
+    if provider == "gemini":
+        if not api_key:
+            logger.warning("tts_provider_fallback", provider="gemini", reason="missing_api_key")
+            return MockTTSProvider()
+        from app.services.providers.gemini_tts import GeminiTTSProvider
+
+        logger.info("tts_provider_init", provider="gemini", model=gemini_model, voice=gemini_voice)
+        return GeminiTTSProvider(
+            api_key=api_key,
+            model=gemini_model,
+            voice=gemini_voice,
+            timeout_seconds=timeout_seconds,
+        )
     msg = f"TTS provider '{provider}' is not supported. Use 'elevenlabs' or 'mock'."
     raise NotImplementedError(msg)
 
@@ -238,7 +261,11 @@ async def get_tts_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> TTSProvider:
     """FastAPI dependency: returns the configured TTS provider."""
-    api_key = settings.elevenlabs_api_key or settings.tts_api_key
+    api_key = (
+        settings.gemini_api_key
+        if settings.tts_provider == "gemini"
+        else settings.elevenlabs_api_key or settings.tts_api_key
+    )
     provider = settings.tts_provider
     if api_key and provider == "mock":
         provider = "elevenlabs"
@@ -248,6 +275,9 @@ async def get_tts_provider(
         settings.elevenlabs_model_id,
         settings.elevenlabs_hr_voice_id,
         settings.elevenlabs_tech_lead_voice_id,
+        settings.tts_model,
+        settings.tts_voice,
+        settings.tts_timeout_seconds,
     )
 
 

@@ -4,6 +4,7 @@ APTLY API — Interview Endpoints
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -26,9 +27,12 @@ from app.schemas.interviews import (
     InterviewCreateRequest,
     InterviewDetailResponse,
     InterviewReviewResponse,
+    QuestionExplanationRequest,
+    QuestionExplanationResponse,
     QuestionResponse,
     SpeechMetricsResponse,
     TranscriptResponse,
+    VisionMetricsResponse,
 )
 from app.schemas.panel import get_persona_profile
 from app.services.interview_service import InterviewService
@@ -178,16 +182,19 @@ async def create_answer(
 async def upload_answer_audio(
     interview_id: UUID,
     answer_id: UUID,
-    audio_file: Annotated[UploadFile, File(description="Binary audio recording file")],
+    audio_file: Annotated[UploadFile, File(description="Binary audio/video recording file")],
     duration_seconds: Annotated[
         float, Form(description="Total recorded duration in seconds")
     ] = 0.0,
     transcript_text: Annotated[
         str | None, Form(description="Optional live candidate speech transcript")
     ] = None,
+    vision_metrics_json: Annotated[
+        str | None, Form(description="Optional privacy-safe browser vision telemetry JSON")
+    ] = None,
     service: InterviewService = Depends(_get_interview_service),
 ) -> AnswerResponse:
-    """Upload recorded audio and process transcript/metrics."""
+    """Upload recorded audio/video and process transcript, speech, content, and vision metrics."""
     from app.core.security import (
         ALLOWED_MEDIA_MIME_TYPES,
         MAX_UPLOAD_SIZE_BYTES,
@@ -224,6 +231,17 @@ async def upload_answer_audio(
             },
         )
 
+    vision_metrics: dict[str, Any] | None = None
+    if vision_metrics_json:
+        try:
+            parsed_vision = json.loads(vision_metrics_json)
+            if isinstance(parsed_vision, dict):
+                vision_metrics = parsed_vision
+        except json.JSONDecodeError:
+            # The recording itself is still useful. The server will persist an
+            # explicit unavailable vision record rather than rejecting the answer.
+            vision_metrics = None
+
     answer = await service.upload_and_process_answer(
         interview_id=interview_id,
         answer_id=answer_id,
@@ -231,6 +249,7 @@ async def upload_answer_audio(
         content_type=content_type,
         duration_seconds=duration_seconds,
         transcript_text=transcript_text,
+        vision_metrics=vision_metrics,
     )
     return _to_answer_response(answer)
 
@@ -263,6 +282,27 @@ async def finish_interview(
     """Finish the interview."""
     interview = await service.finish_interview(interview_id)
     return _to_detail_response(interview)
+
+
+@router.post(
+    "/{interview_id}/questions/{question_id}/explain",
+    response_model=QuestionExplanationResponse,
+    summary="Explain a question doubt",
+    description="Explains the current interview question without giving away a full model answer.",
+)
+async def explain_question(
+    interview_id: UUID,
+    question_id: UUID,
+    payload: QuestionExplanationRequest,
+    service: InterviewService = Depends(_get_interview_service),
+) -> QuestionExplanationResponse:
+    """Let the candidate ask for clarification during a realistic interview."""
+    explanation = await service.explain_question(
+        interview_id=interview_id,
+        question_id=question_id,
+        doubt=payload.doubt,
+    )
+    return QuestionExplanationResponse(**explanation)
 
 
 @router.get(
@@ -382,6 +422,11 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             words=t.words_json,
             model_provider=t.model_provider,
             model_version=t.model_version,
+            quality_score=t.quality_score,
+            provider_confidence=t.provider_confidence,
+            source_agreement_score=t.source_agreement_score,
+            quality_label=t.quality_label,
+            quality_notes=t.quality_notes,
             created_at=t.created_at,
         )
 
@@ -416,6 +461,11 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             structure_score=cm.structure_score,
             evidence_score=cm.evidence_score,
             overall_content_score=cm.overall_content_score,
+            correctness_status=cm.correctness_status,
+            correctness_score=cm.correctness_score,
+            correctness_summary=cm.correctness_summary,
+            topic_coverage=cm.topic_coverage_json,
+            ideal_answer_outline=cm.ideal_answer_outline_json,
             strengths=cm.strengths_json,
             weaknesses=cm.weaknesses_json,
             star_analysis=cm.star_analysis_json,
@@ -430,6 +480,32 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
             created_at=cm.created_at,
         )
 
+    vision_metrics_res = None
+    if getattr(answer, "vision_metrics", None):
+        vm = answer.vision_metrics
+        vision_metrics_res = VisionMetricsResponse(
+            id=vm.id,
+            answer_id=vm.answer_id,
+            provider=vm.provider,
+            model_version=vm.model_version,
+            capability_status=vm.capability_status,
+            frame_count=vm.frame_count,
+            valid_frame_count=vm.valid_frame_count,
+            analysis_duration_seconds=vm.analysis_duration_seconds,
+            face_detected_ratio=vm.face_detected_ratio,
+            multiple_people_ratio=vm.multiple_people_ratio,
+            eye_contact_ratio=vm.eye_contact_ratio,
+            face_centering_score=vm.face_centering_score,
+            tracking_confidence=vm.tracking_confidence,
+            visual_communication_score=vm.visual_communication_score,
+            expression_signal=vm.expression_signal,
+            expression_confidence=vm.expression_confidence,
+            face_presence_events=vm.face_presence_events_json,
+            strengths=vm.strengths_json,
+            improvements=vm.improvements_json,
+            created_at=vm.created_at,
+        )
+
     return AnswerResponse(
         id=answer.id,
         interview_id=answer.interview_id,
@@ -440,9 +516,14 @@ def _to_answer_response(answer: Any) -> AnswerResponse:
         started_at=answer.started_at,
         ended_at=answer.ended_at,
         audio_storage_key=answer.audio_storage_key,
+        video_storage_key=answer.video_storage_key,
         audio_size_bytes=answer.audio_size_bytes,
+        video_size_bytes=answer.video_size_bytes,
+        media_content_type=answer.media_content_type,
+        media_has_video=answer.media_has_video,
         transcript=transcript_res,
         speech_metrics=speech_metrics_res,
         content_metrics=content_metrics_res,
+        vision_metrics=vision_metrics_res,
         created_at=answer.created_at,
     )

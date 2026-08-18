@@ -27,13 +27,20 @@ from app.models.job import Job, RoleProfile
 from app.models.metrics import SpeechMetrics
 from app.models.question import Question
 from app.models.transcript import Transcript
+from app.models.vision_metrics import VisionMetrics
 from app.schemas.content_intelligence import ContentAnalysisInput
 from app.schemas.panel import get_persona_profile
 from app.services.adaptive_interview.engine import GeminiAdaptiveEngine
 from app.services.content_intelligence.service import ContentAnalysisService
 from app.services.media_normalizer import MediaNormalizerService
+from app.services.multimodal_analysis import (
+    build_vision_coaching,
+    calculate_transcript_quality,
+    normalize_vision_metrics,
+)
 from app.services.panel_service import PanelInterviewService
 from app.services.providers.base import (
+    LLMGenerateRequest,
     LLMProvider,
     TranscriptionProvider,
     TranscriptionRequest,
@@ -163,6 +170,7 @@ class InterviewService:
             job_id=role_profile.job_id,
             role_profile_id=role_profile.id,
             user_id=user_id,
+            learner_id=user_id or "anonymous",
             status="created",
             interview_type=interview_type,
             difficulty_level=difficulty_level,
@@ -307,6 +315,7 @@ class InterviewService:
         content_type: str = "audio/webm",
         duration_seconds: float = 0.0,
         transcript_text: str | None = None,
+        vision_metrics: dict[str, Any] | None = None,
     ) -> Answer:
         """
         Store audio bytes, mark answer uploaded, and trigger async speech processing.
@@ -323,15 +332,19 @@ class InterviewService:
                 f"Interview '{interview_id}' not found.", code="INTERVIEW_NOT_FOUND"
             )
 
-        # 1. Upload original audio/video to storage with safe fallback
+        # 1. Upload original audio/video to storage with safe fallback.
+        # Keep the legacy audio key populated for old clients and use an
+        # explicit video key whenever the container includes video.
         sha256_hash = self.media_normalizer.compute_sha256(audio_data)
-        storage_key = f"raw_audio/{interview_id}/{answer_id}.webm"
+        is_video_upload = content_type.startswith("video/")
+        media_class = "raw_video" if is_video_upload else "raw_audio"
+        storage_key = f"{media_class}/{interview_id}/{answer_id}.webm"
         audio_size = len(audio_data)
         try:
             upload_req = UploadRequest(
                 data=audio_data,
                 content_type=content_type,
-                data_class="raw_audio",
+                data_class=media_class,
                 interview_id=str(interview_id),
                 answer_id=str(answer_id),
                 extension="webm",
@@ -344,16 +357,25 @@ class InterviewService:
 
         # 2. Extract & Normalize Audio via FFmpeg to 16kHz Mono WAV
         normalized_wav_bytes = audio_data
+        normalized_content_type = content_type
+        media_info: dict[str, Any] = {
+            "has_audio": True,
+            "has_video": is_video_upload,
+            "duration_seconds": duration_seconds,
+        }
         normalized_key = None
         try:
             wav_bytes, media_info = self.media_normalizer.normalize_bytes(audio_data, extension="webm")
             normalized_wav_bytes = wav_bytes
+            media_info["has_video"] = bool(media_info.get("has_video") or is_video_upload)
+            if wav_bytes[:4] == b"RIFF":
+                normalized_content_type = "audio/wav"
 
             try:
                 wav_upload_req = UploadRequest(
                     data=normalized_wav_bytes,
                     content_type="audio/wav",
-                    data_class="raw_audio",
+                    data_class="normalized_audio",
                     interview_id=str(interview_id),
                     answer_id=str(answer_id),
                     extension="wav",
@@ -370,9 +392,14 @@ class InterviewService:
 
         # 3. Update answer metadata
         answer.audio_storage_key = storage_key
+        answer.video_storage_key = storage_key if bool(media_info.get("has_video")) else None
         answer.normalized_storage_key = normalized_key
         answer.audio_size_bytes = audio_size
+        answer.video_size_bytes = audio_size if bool(media_info.get("has_video")) else None
         answer.audio_checksum_sha256 = sha256_hash
+        answer.video_checksum_sha256 = sha256_hash if bool(media_info.get("has_video")) else None
+        answer.media_content_type = content_type
+        answer.media_has_video = bool(media_info.get("has_video"))
         answer.duration_seconds = duration_seconds or max(
             3.0, round(len(audio_data) / 16000.0, 1)
         )
@@ -390,8 +417,9 @@ class InterviewService:
         await self._process_answer_pipeline(
             answer,
             normalized_wav_bytes or audio_data,
-            "audio/wav" if normalized_wav_bytes else content_type,
+            normalized_content_type,
             transcript_text=transcript_text,
+            vision_metrics=vision_metrics,
         )
 
         return answer
@@ -402,6 +430,7 @@ class InterviewService:
         audio_data: bytes,
         content_type: str,
         transcript_text: str | None = None,
+        vision_metrics: dict[str, Any] | None = None,
     ) -> None:
         """
         Non-blocking speech processing pipeline:
@@ -417,7 +446,11 @@ class InterviewService:
         transcription_res: TranscriptionResponse
 
         clean_live_text = (transcript_text or "").strip()
-        if clean_live_text:
+        provider_name = str(getattr(self.transcription_provider, "PROVIDER_NAME", "")).lower()
+        use_live_only = bool(clean_live_text and provider_name in {"", "mock", "browser"})
+        used_live_fallback = False
+
+        def _live_transcription() -> TranscriptionResponse:
             dur = answer.duration_seconds or max(3.0, len(clean_live_text.split()) * 0.45)
             words_list = clean_live_text.split()
             step_time = dur / max(1, len(words_list))
@@ -430,7 +463,7 @@ class InterviewService:
                 )
                 for i, w in enumerate(words_list)
             ]
-            transcription_res = TranscriptionResponse(
+            return TranscriptionResponse(
                 text=clean_live_text,
                 words=live_words,
                 language="en",
@@ -438,6 +471,9 @@ class InterviewService:
                 provider="live_browser_speech",
                 model_version="web-speech-api",
             )
+
+        if use_live_only:
+            transcription_res = _live_transcription()
         else:
             try:
                 transcription_res = await self.transcription_provider.transcribe(
@@ -448,17 +484,32 @@ class InterviewService:
                         metadata={"answer_id": str(answer.id)},
                     )
                 )
+                if not transcription_res.text.strip() and clean_live_text:
+                    transcription_res = _live_transcription()
+                    used_live_fallback = True
             except Exception as tx_err:
                 logger.warning("transcription_provider_failed", error=str(tx_err))
-                dur = answer.duration_seconds or 5.0
-                transcription_res = TranscriptionResponse(
-                    text="[No speech detected or silent answer]",
-                    words=[],
-                    language="en",
-                    duration_seconds=dur,
-                    provider="vad_silence_detector",
-                    model_version="1.0",
-                )
+                if clean_live_text:
+                    transcription_res = _live_transcription()
+                    used_live_fallback = True
+                else:
+                    dur = answer.duration_seconds or 5.0
+                    transcription_res = TranscriptionResponse(
+                        text="[No speech detected or silent answer]",
+                        words=[],
+                        language="en",
+                        duration_seconds=dur,
+                        provider="vad_silence_detector",
+                        model_version="1.0",
+                    )
+
+        transcript_quality = calculate_transcript_quality(
+            provider=transcription_res.provider,
+            text=transcription_res.text,
+            words=transcription_res.words,
+            live_transcript=clean_live_text or None,
+            used_live_fallback=used_live_fallback,
+        )
 
         words_data = [
             {
@@ -479,9 +530,45 @@ class InterviewService:
             words_json=words_data,
             model_provider=transcription_res.provider,
             model_version=transcription_res.model_version,
+            quality_score=transcript_quality.quality_score,
+            provider_confidence=transcript_quality.provider_confidence,
+            source_agreement_score=transcript_quality.source_agreement_score,
+            quality_label=transcript_quality.quality_label,
+            quality_notes=transcript_quality.quality_notes,
             schema_version="1.0",
         )
         self.db.add(transcript)
+
+        # Step A2: Persist validated browser-side visual telemetry. The record
+        # is explicit even when the browser could not provide a face model.
+        normalized_vision = normalize_vision_metrics(vision_metrics)
+        visual_score, visual_strengths, visual_improvements = build_vision_coaching(
+            normalized_vision
+        )
+        vision_record = await self.db.scalar(
+            select(VisionMetrics).where(VisionMetrics.answer_id == answer.id)
+        )
+        if vision_record is None:
+            vision_record = VisionMetrics(answer_id=answer.id)
+            self.db.add(vision_record)
+        vision_record.provider = normalized_vision["provider"]
+        vision_record.model_version = normalized_vision["model_version"]
+        vision_record.capability_status = normalized_vision["capability_status"]
+        vision_record.frame_count = normalized_vision["frame_count"]
+        vision_record.valid_frame_count = normalized_vision["valid_frame_count"]
+        vision_record.analysis_duration_seconds = normalized_vision["analysis_duration_seconds"]
+        vision_record.face_detected_ratio = normalized_vision["face_detected_ratio"]
+        vision_record.multiple_people_ratio = normalized_vision["multiple_people_ratio"]
+        vision_record.eye_contact_ratio = normalized_vision["eye_contact_ratio"]
+        vision_record.face_centering_score = normalized_vision["face_centering_score"]
+        vision_record.tracking_confidence = normalized_vision["tracking_confidence"]
+        vision_record.visual_communication_score = visual_score
+        vision_record.expression_signal = normalized_vision["expression_signal"]
+        vision_record.expression_confidence = normalized_vision["expression_confidence"]
+        vision_record.face_presence_events_json = normalized_vision["face_presence_events"]
+        vision_record.strengths_json = visual_strengths
+        vision_record.improvements_json = visual_improvements
+        await self.db.flush()
         answer.transcription_status = "completed"
 
         # Step B: Compute deterministic speech metrics
@@ -535,6 +622,19 @@ class InterviewService:
                 provider=getattr(self.llm_provider, "PROVIDER_NAME", "gemini"),
                 model=getattr(self.llm_provider, "MODEL_NAME", "gemini-2.5-flash"),
             )
+            if question and interview:
+                # Update the durable topic graph immediately after evaluation.
+                # This is idempotent for repeated uploads of the same answer.
+                from app.services.knowledge_graph import KnowledgeGraphService
+
+                await KnowledgeGraphService().record_answer(
+                    db=self.db,
+                    learner_id=interview.learner_id or interview.user_id or "anonymous",
+                    interview_id=interview.id,
+                    answer_id=answer.id,
+                    question=question,
+                    content_metrics=content_metrics_record,
+                )
             logger.info(
                 "content_intelligence_completed",
                 answer_id=str(answer.id),
@@ -627,6 +727,70 @@ class InterviewService:
 
         return interview
 
+    async def explain_question(
+        self,
+        interview_id: UUID,
+        question_id: UUID,
+        doubt: str,
+    ) -> dict[str, str]:
+        """Answer a candidate's clarification request in interviewer voice."""
+        interview = await self.get_interview_detail(interview_id)
+        if not interview:
+            raise AptlyException(
+                f"Interview '{interview_id}' not found.", code="INTERVIEW_NOT_FOUND"
+            )
+        question = next((item for item in interview.questions if item.id == question_id), None)
+        if not question:
+            raise AptlyException(
+                f"Question '{question_id}' not found in this interview.",
+                code="QUESTION_NOT_FOUND",
+            )
+
+        role_title = interview.role_profile.role_title if interview.role_profile else interview.title
+        prompt = f"""The candidate is in a realistic {interview.difficulty_level}-difficulty interview for {role_title}.
+Question: {question.question_text}
+Candidate's clarification request: {doubt}
+
+Explain the question or evaluation expectation in plain, encouraging language.
+Give one small example of what a strong answer would cover, without writing the candidate's answer for them.
+Keep the response under 120 words and do not ask a new interview question."""
+        try:
+            response = await self.llm_provider.generate_text(
+                LLMGenerateRequest(
+                    prompt=prompt,
+                    system_prompt=(
+                        "You are a warm, precise interview coach. Clarify doubts without "
+                        "revealing a full model answer or judging the candidate."
+                    ),
+                    temperature=0.3,
+                    max_tokens=220,
+                )
+            )
+            answer_text = response.text.strip()
+            provider = response.provider
+            model = response.model
+        except Exception as exc:
+            logger.warning("question_explanation_failed_using_fallback", error=str(exc))
+            answer_text = (
+                "Focus on the decision you would make, why you would make it, and one "
+                "trade-off or concrete example. You do not need to guess a single perfect answer."
+            )
+            provider = "fallback"
+            model = "deterministic"
+
+        if not answer_text:
+            answer_text = (
+                "Break the question into the goal, your approach, and the trade-offs you considered. "
+                "A concise example makes the reasoning easier to evaluate."
+            )
+        return {
+            "question_id": str(question_id),
+            "doubt": doubt,
+            "answer": answer_text,
+            "provider": provider,
+            "model": model,
+        }
+
     @staticmethod
     def _build_report_card(
         session_id: str,
@@ -637,6 +801,10 @@ class InterviewService:
         total_fillers: int,
         total_pauses: int,
         competency_coverage: dict[str, Any] | None = None,
+        correctness_score: float = 0.0,
+        visual_communication_score: float | None = None,
+        visual_strengths: list[str] | None = None,
+        visual_improvements: list[str] | None = None,
     ) -> dict[str, Any]:
         """Assemble the evidence-first report card with universal EvidenceEvent contracts.
 
@@ -958,12 +1126,25 @@ class InterviewService:
         filler_score = max(0.0, 100.0 - total_fillers * 12.0)
         pause_score = max(0.0, 100.0 - total_pauses * 10.0)
         delivery_score = round((pace_score + filler_score + pause_score) / 3, 1)
-        overall_score = round(
-            average_content_score * 0.65 + delivery_score * 0.35
-            if questions_review
-            else 0.0,
-            1,
-        )
+        if questions_review and visual_communication_score is not None:
+            # When a reliable visual capability is available, include it in
+            # the combined score. Audio-only sessions retain the legacy
+            # content/delivery weighting and are not penalized.
+            overall_score = round(
+                average_content_score * 0.55
+                + delivery_score * 0.25
+                + visual_communication_score * 0.20,
+                1,
+            )
+            multimodal_score = overall_score
+        else:
+            overall_score = round(
+                average_content_score * 0.65 + delivery_score * 0.35
+                if questions_review
+                else 0.0,
+                1,
+            )
+            multimodal_score = None
 
         weakest_question_number = None
         scored_questions = [
@@ -1019,7 +1200,18 @@ class InterviewService:
         return {
             "overall_score": overall_score,
             "content_score": round(average_content_score, 1),
+            "correctness_score": round(correctness_score, 1),
+            "correctness_label": (
+                "Strongly correct" if correctness_score >= 80
+                else "Partially correct" if correctness_score >= 50
+                else "Needs a clearer answer" if correctness_score > 0
+                else "Not enough evidence"
+            ),
             "delivery_score": delivery_score,
+            "visual_communication_score": visual_communication_score,
+            "multimodal_score": multimodal_score,
+            "visual_strengths": list(dict.fromkeys(visual_strengths or []))[:3],
+            "visual_improvements": list(dict.fromkeys(visual_improvements or []))[:4],
             "confidence_label": "Measured + evidence-linked" if questions_review else "Awaiting answers",
             "strengths": list(dict.fromkeys(strengths))[:3],
             "top_habits": top_habits,
@@ -1075,6 +1267,10 @@ class InterviewService:
         content_scores_list: list[float] = []
         relevance_scores_list: list[float] = []
         tech_depth_scores_list: list[float] = []
+        correctness_scores_list: list[float] = []
+        visual_scores_list: list[float] = []
+        visual_strengths: list[str] = []
+        visual_improvements: list[str] = []
         questions_review: list[dict[str, Any]] = []
 
         # Map answers by question_id
@@ -1110,6 +1306,7 @@ class InterviewService:
                 "transcript": None,
                 "speech_metrics": None,
                 "content_metrics": None,
+                "vision_metrics": None,
             }
 
             if ans:
@@ -1124,7 +1321,11 @@ class InterviewService:
                     "started_at": ans.started_at,
                     "ended_at": ans.ended_at,
                     "audio_storage_key": ans.audio_storage_key,
+                    "video_storage_key": ans.video_storage_key,
                     "audio_size_bytes": ans.audio_size_bytes,
+                    "video_size_bytes": ans.video_size_bytes,
+                    "media_content_type": ans.media_content_type,
+                    "media_has_video": ans.media_has_video,
                     "created_at": ans.created_at,
                 }
 
@@ -1140,6 +1341,11 @@ class InterviewService:
                         "words": ans.transcript.words_json,
                         "model_provider": ans.transcript.model_provider,
                         "model_version": ans.transcript.model_version,
+                        "quality_score": ans.transcript.quality_score,
+                        "provider_confidence": ans.transcript.provider_confidence,
+                        "source_agreement_score": ans.transcript.source_agreement_score,
+                        "quality_label": ans.transcript.quality_label,
+                        "quality_notes": ans.transcript.quality_notes,
                         "created_at": ans.transcript.created_at,
                     }
 
@@ -1190,6 +1396,7 @@ class InterviewService:
                     content_scores_list.append(cm.overall_content_score)
                     relevance_scores_list.append(cm.relevance_score)
                     tech_depth_scores_list.append(cm.technical_depth_score)
+                    correctness_scores_list.append(cm.correctness_score)
 
                     item["content_metrics"] = {
                         "id": cm.id,
@@ -1201,6 +1408,11 @@ class InterviewService:
                         "structure_score": cm.structure_score,
                         "evidence_score": cm.evidence_score,
                         "overall_content_score": cm.overall_content_score,
+                        "correctness_status": cm.correctness_status,
+                        "correctness_score": cm.correctness_score,
+                        "correctness_summary": cm.correctness_summary,
+                        "topic_coverage": cm.topic_coverage_json,
+                        "ideal_answer_outline": cm.ideal_answer_outline_json,
                         "strengths": cm.strengths_json,
                         "weaknesses": cm.weaknesses_json,
                         "star_analysis": cm.star_analysis_json,
@@ -1213,6 +1425,35 @@ class InterviewService:
                         "model": cm.model,
                         "prompt_version": cm.prompt_version,
                         "created_at": cm.created_at,
+                    }
+
+                if ans.vision_metrics:
+                    vm = ans.vision_metrics
+                    if vm.visual_communication_score is not None:
+                        visual_scores_list.append(vm.visual_communication_score)
+                    visual_strengths.extend(vm.strengths_json or [])
+                    visual_improvements.extend(vm.improvements_json or [])
+                    item["vision_metrics"] = {
+                        "id": vm.id,
+                        "answer_id": vm.answer_id,
+                        "provider": vm.provider,
+                        "model_version": vm.model_version,
+                        "capability_status": vm.capability_status,
+                        "frame_count": vm.frame_count,
+                        "valid_frame_count": vm.valid_frame_count,
+                        "analysis_duration_seconds": vm.analysis_duration_seconds,
+                        "face_detected_ratio": vm.face_detected_ratio,
+                        "multiple_people_ratio": vm.multiple_people_ratio,
+                        "eye_contact_ratio": vm.eye_contact_ratio,
+                        "face_centering_score": vm.face_centering_score,
+                        "tracking_confidence": vm.tracking_confidence,
+                        "visual_communication_score": vm.visual_communication_score,
+                        "expression_signal": vm.expression_signal,
+                        "expression_confidence": vm.expression_confidence,
+                        "face_presence_events": vm.face_presence_events_json,
+                        "strengths": vm.strengths_json,
+                        "improvements": vm.improvements_json,
+                        "created_at": vm.created_at,
                     }
 
             # Extract Answer DNA (Technical or Behavioral)
@@ -1247,6 +1488,16 @@ class InterviewService:
             round(sum(tech_depth_scores_list) / len(tech_depth_scores_list), 1)
             if tech_depth_scores_list
             else 0.0
+        )
+        avg_correctness = (
+            round(sum(correctness_scores_list) / len(correctness_scores_list), 1)
+            if correctness_scores_list
+            else 0.0
+        )
+        avg_visual = (
+            round(sum(visual_scores_list) / len(visual_scores_list), 1)
+            if visual_scores_list
+            else None
         )
 
         # Collect target competencies from role profile or question competencies
@@ -1286,6 +1537,10 @@ class InterviewService:
             total_fillers=total_fillers,
             total_pauses=total_pauses,
             competency_coverage=competency_coverage,
+            correctness_score=avg_correctness,
+            visual_communication_score=avg_visual,
+            visual_strengths=visual_strengths,
+            visual_improvements=visual_improvements,
         )
 
         panel_report = self.panel_service.compile_panel_report(questions_review).model_dump()
@@ -1335,6 +1590,8 @@ class InterviewService:
             "average_content_score": avg_content,
             "average_relevance_score": avg_relevance,
             "average_technical_depth_score": avg_tech_depth,
+            "average_correctness_score": avg_correctness,
+            "average_visual_communication_score": avg_visual,
             "questions_review": questions_review,
             "report_card": report_card,
             "panel_report": panel_report,

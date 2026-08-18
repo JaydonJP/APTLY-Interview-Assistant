@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/layout/AppShell";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -162,6 +162,14 @@ export default function NewInterviewPage() {
   const [difficultyLevel, setDifficultyLevel] = useState<string>("medium");
   const [targetDurationMinutes, setTargetDurationMinutes] = useState<number>(10);
   const [questionCount, setQuestionCount] = useState<number>(3);
+  const [recommendedDifficulty, setRecommendedDifficulty] = useState<string | null>(null);
+
+  useEffect(() => {
+    void apiClient
+      .get<{ recommended_difficulty: string }>("/api/v1/progress")
+      .then((progress) => setRecommendedDifficulty(progress.recommended_difficulty))
+      .catch(() => undefined);
+  }, []);
 
   // Step 1: Analyze Job Description
   const handleAnalyzeJD = async () => {
@@ -626,6 +634,12 @@ export default function NewInterviewPage() {
                 <label className="text-xs font-medium text-slate-300 mb-2 block">
                   Target Difficulty
                 </label>
+                {recommendedDifficulty && (
+                  <div className="mb-2 flex items-center justify-between rounded-lg border border-cyan-500/20 bg-cyan-950/20 px-3 py-2 text-[11px] text-cyan-200">
+                    <span>Based on your tracked mastery: <strong className="capitalize">{recommendedDifficulty}</strong></span>
+                    <button type="button" onClick={() => setDifficultyLevel(recommendedDifficulty)} className="font-bold text-white hover:text-cyan-300">Use recommendation</button>
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: "easy", label: "Standard / Warm-up" },

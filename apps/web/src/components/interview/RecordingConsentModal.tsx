@@ -46,6 +46,10 @@ export function RecordingConsentModal({ isOpen, onConsent }: RecordingConsentMod
               <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
               <span>Post-interview answer playback with synchronized video seeking</span>
             </li>
+            <li className="flex items-center space-x-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              <span>Optional coarse face framing, multi-person, camera-facing, and expression cues</span>
+            </li>
           </ul>
         </div>
 
@@ -68,7 +72,7 @@ export function RecordingConsentModal({ isOpen, onConsent }: RecordingConsentMod
         </div>
 
         <p className="text-[11px] text-slate-500 text-center">
-          Recordings are stored securely in your private Supabase media bucket and can be reviewed or deleted anytime.
+          Visual cues are non-identifying and non-clinical. APTLY does not recognize identities or diagnose emotion; unavailable signals are never guessed. Recordings are stored securely in your private Supabase media bucket and can be reviewed or deleted anytime.
         </p>
       </Card>
     </div>

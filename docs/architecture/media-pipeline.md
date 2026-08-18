@@ -28,7 +28,7 @@ The APTLY media pipeline handles high-throughput video and audio recording, brow
                           │       (S3 / R2 / Dev Local) │  │                         │
                           │                             │  │ 1. Issues signed URL    │
                           │ Audio/Video Key:            │  │ 2. Receives metrics     │
-                          │ raw_audio/{uuid}.webm       │  │ 3. Enqueues job         │
+                          │ raw_video/{uuid}.webm       │  │ 3. Enqueues job         │
                           └──────────────┬──────────────┘  └───────────┬─────────────┘
                                          │                             │
                                          │ Trigger                     │
@@ -51,10 +51,13 @@ The APTLY media pipeline handles high-throughput video and audio recording, brow
 ### 1. Media NEVER Travels Through JSON API Bodies
 - **Rule**: `POST /answers` does **NOT** accept Base64-encoded audio/video payloads.
 - **Workflow**:
-  1. Frontend requests an authorized presigned upload URL: `GET /api/v1/interviews/{id}/upload-url`.
-  2. Backend generates a presigned S3/R2 URL bound to a UUID key (`raw_audio/{interview_id}/{uuid}.webm`).
-  3. Frontend uploads binary chunks directly from `MediaRecorder` to Object Storage via HTTP `PUT`.
-  4. Frontend commits metadata (`storage_key`, `duration_seconds`, `checksum_sha256`) to the backend.
+  1. The current interview flow submits the `MediaRecorder` WebM as multipart
+     `audio_file` for compatibility; the backend classifies it as audio or
+     video from its MIME/stream metadata and stores opaque keys.
+  2. The browser separately sends bounded `vision_metrics_json`; sampled frames
+     and face embeddings are never sent.
+  3. The original media is retained for private evidence replay while FFmpeg
+     extracts a normalized WAV for transcription.
 
 ### 2. Browser-Side MediaPipe (Privacy & Performance)
 - **Design**: MediaPipe runs client-side in WebAssembly (WASM).
@@ -64,7 +67,10 @@ The APTLY media pipeline handles high-throughput video and audio recording, brow
   - Camera-facing attention proxy (eye gaze alignment)
   - Look-away events
   - Head nods / shakes
-- **Privacy Guarantee**: Raw video frames **never leave the user's browser**. Only anonymized scalar `VisionMetrics` JSON are transmitted to backend servers.
+- **Privacy Guarantee**: Raw video frames are never sent to a model API or
+  retained as individual analysis frames. Only anonymized scalar
+  `VisionMetrics` JSON is sent for visual coaching; the original recording is
+  separately retained for the user's private replay.
 - **Benefits**:
   - Zero GPU server processing costs for video streaming.
   - Sub-millisecond latency for visual delivery feedback.

@@ -78,6 +78,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # an unrelated SQLite database.
     from app.dependencies import get_async_engine
     from app.models.base import Base
+    # Import the model package so every declarative table, including the
+    # multimodal telemetry table, is registered before create_all().
+    import app.models  # noqa: F401
 
     async def _init_db() -> None:
         engine = get_async_engine(settings.database_url)
@@ -88,7 +91,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             Base.metadata.create_all(sync_conn)
             # Automatic column migration for sqlite
             try:
-                from sqlalchemy import text
                 cursor = sync_conn.connection.cursor()
                 # Check questions table columns
                 cols = [r[1] for r in cursor.execute("PRAGMA table_info(questions)").fetchall()]
@@ -96,6 +98,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     cursor.execute("ALTER TABLE questions ADD COLUMN interviewer_persona VARCHAR(50)")
                 if cols and "normalized_storage_key" not in cols:
                     cursor.execute("ALTER TABLE answers ADD COLUMN normalized_storage_key VARCHAR(255)")
+                answer_cols = [r[1] for r in cursor.execute("PRAGMA table_info(answers)").fetchall()]
+                answer_additions = {
+                    "video_storage_key": "VARCHAR(500)",
+                    "video_size_bytes": "INTEGER",
+                    "video_checksum_sha256": "VARCHAR(64)",
+                    "media_content_type": "VARCHAR(100)",
+                    "media_has_video": "BOOLEAN NOT NULL DEFAULT 0",
+                }
+                for column, column_type in answer_additions.items():
+                    if answer_cols and column not in answer_cols:
+                        cursor.execute(f"ALTER TABLE answers ADD COLUMN {column} {column_type}")
+
+                transcript_cols = [r[1] for r in cursor.execute("PRAGMA table_info(transcripts)").fetchall()]
+                transcript_additions = {
+                    "quality_score": "FLOAT NOT NULL DEFAULT 0",
+                    "provider_confidence": "FLOAT NOT NULL DEFAULT 0",
+                    "source_agreement_score": "FLOAT",
+                    "quality_label": "VARCHAR(20) NOT NULL DEFAULT 'low'",
+                    "quality_notes": "TEXT NOT NULL DEFAULT ''",
+                }
+                for column, column_type in transcript_additions.items():
+                    if transcript_cols and column not in transcript_cols:
+                        cursor.execute(f"ALTER TABLE transcripts ADD COLUMN {column} {column_type}")
             except Exception as e:
                 logger.warning("sqlite_column_sync_warning", error=str(e))
 
@@ -150,7 +175,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             settings.supabase_service_role_key,
             settings.storage_bucket,
         )
-        await storage.ensure_private_bucket()  # type: ignore[attr-defined]
+        if hasattr(storage, "ensure_private_bucket"):
+            await storage.ensure_private_bucket()  # type: ignore[attr-defined]
 
     yield  # Application is running
 

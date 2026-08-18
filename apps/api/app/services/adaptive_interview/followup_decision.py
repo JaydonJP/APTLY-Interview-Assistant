@@ -96,9 +96,11 @@ class FollowUpDecisionService:
                 justification="Max follow-up count for parent question reached.",
             )
 
-        # Guard 2: Short / empty answer guardrail
+        # Guard 2: Empty answers cannot be grounded, but a short non-empty
+        # answer is exactly where a real interviewer asks the candidate to
+        # expand rather than silently moving on.
         words = transcript.strip().split()
-        if len(words) < 4:
+        if not words:
             return FollowUpDecision(
                 should_follow_up=False,
                 reason=FollowUpReason.NO_FOLLOW_UP,
@@ -143,6 +145,18 @@ class FollowUpDecisionService:
                 target_competency=question.competency or "Execution & Measurement",
                 context_quote=top_claim.quote,
                 justification=f"Candidate made {top_claim.claim_type} claim '{top_claim.quote}' without supporting {', '.join(top_claim.missing_evidence[:2])}.",
+            )
+
+        if len(words) < 6:
+            return FollowUpDecision(
+                should_follow_up=True,
+                reason=FollowUpReason.MISSING_EVIDENCE,
+                followup_action=FollowUpAction.CLARIFY,
+                claim_type=ClaimType.TECHNICAL_CAUSALITY,
+                missing_evidence=["reasoning", "example", "trade-off"],
+                target_competency=question.competency or "Core Competency",
+                context_quote=transcript.strip(),
+                justification="The answer is short but non-empty; ask for one concrete expansion before advancing.",
             )
 
         if not content_metrics:

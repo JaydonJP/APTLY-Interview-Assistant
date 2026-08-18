@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.models.metrics import SpeechMetrics
     from app.models.question import Question
     from app.models.transcript import Transcript
+    from app.models.vision_metrics import VisionMetrics
 
 
 class Answer(UUIDMixin, TimestampMixin, Base):
@@ -53,9 +54,14 @@ class Answer(UUIDMixin, TimestampMixin, Base):
 
     # Object storage reference
     audio_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    video_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     normalized_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     audio_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    video_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    video_checksum_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    media_content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    media_has_video: Mapped[bool] = mapped_column(nullable=False, default=False)
 
     # Phase 3 Recording & Processing Traceability
     recording_session_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
@@ -86,6 +92,13 @@ class Answer(UUIDMixin, TimestampMixin, Base):
     )
     content_metrics: Mapped[ContentMetrics | None] = relationship(
         "ContentMetrics",
+        back_populates="answer",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+    vision_metrics: Mapped[VisionMetrics | None] = relationship(
+        "VisionMetrics",
         back_populates="answer",
         uselist=False,
         lazy="selectin",

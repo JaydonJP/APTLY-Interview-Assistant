@@ -31,6 +31,7 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { RepairModeModal } from "@/components/repair/RepairModeModal";
 import { AnswerDNACard } from "@/components/dna/AnswerDNACard";
 import { DualPerspectivePanelCard } from "@/components/panel/DualPerspectivePanelCard";
+import { TextTimeline } from "@/components/review/TextTimeline";
 import type {
   ContentMetrics,
   EvidenceEvent,
@@ -50,6 +51,19 @@ function scoreColor(score: number): string {
   if (score >= 80) return "text-emerald-300";
   if (score >= 60) return "text-amber-300";
   return "text-rose-300";
+}
+
+function correctnessLabel(status?: string): string {
+  switch (status) {
+    case "correct":
+      return "Correct / interview-ready";
+    case "partially_correct":
+      return "Partially correct";
+    case "incorrect":
+      return "Needs correction";
+    default:
+      return "Not enough evidence";
+  }
 }
 
 export default function InterviewReviewPage() {
@@ -86,8 +100,8 @@ export default function InterviewReviewPage() {
   const currentItem: QuestionReviewItem | undefined = review?.questions_review[selectedIndex];
   const content: ContentMetrics | null | undefined = currentItem?.content_metrics;
   const report: InterviewReportCard | null = review?.report_card ?? null;
-  const currentVideoUrl = currentItem?.answer?.audio_storage_key
-    ? getMediaUrl(currentItem.answer.audio_storage_key)
+  const currentVideoUrl = (currentItem?.answer?.video_storage_key || currentItem?.answer?.audio_storage_key)
+    ? getMediaUrl((currentItem.answer.video_storage_key || currentItem.answer.audio_storage_key) as string)
     : null;
 
   // Build grounded timeline events for the selected question
@@ -261,7 +275,7 @@ export default function InterviewReviewPage() {
             </div>
 
             {/* Speaking Signals Breakdown */}
-            <div className="lg:col-span-8 grid grid-cols-3 gap-4">
+            <div className="lg:col-span-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pace (WPM)</p>
                 <p className="mt-2 font-mono text-2xl font-bold text-white">
@@ -288,6 +302,17 @@ export default function InterviewReviewPage() {
                   {report ? Math.round(report.content_score) : 84}/100
                 </p>
                 <p className="mt-1 text-[11px] text-cyan-300 font-medium">STAR validated</p>
+              </div>
+
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Visual Signals</p>
+                <p className="mt-2 font-mono text-2xl font-bold text-white">
+                  {report?.visual_communication_score == null ? "—" : Math.round(report.visual_communication_score)}
+                  {report?.visual_communication_score != null && <span className="text-xs font-normal text-slate-400">/100</span>}
+                </p>
+                <p className="mt-1 text-[11px] text-cyan-300 font-medium">
+                  {report?.visual_communication_score == null ? "Unavailable, not penalized" : "Framing + camera-facing proxy"}
+                </p>
               </div>
             </div>
           </div>
@@ -322,6 +347,87 @@ export default function InterviewReviewPage() {
             </span>
           </div>
         </div>
+
+        {/* ── ANSWER CORRECTNESS & KNOWLEDGE COVERAGE ── */}
+        <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-[#111b1b] to-[#0e141a] p-6 shadow-xl sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="eyebrow text-emerald-300">Answer analysis</p>
+              <h2 className="mt-1 text-xl font-bold text-white">Did your answer actually answer the question?</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-400">
+                This verdict is based on the question&apos;s expected topics and what appeared in your transcript—not on speaking confidence alone.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-emerald-400/25 bg-emerald-950/30 px-4 py-3 text-right">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">Session correctness</p>
+              <p className={`mt-1 font-mono text-3xl font-bold ${scoreColor(review.average_correctness_score ?? report?.correctness_score ?? 0)}`}>
+                {Math.round(review.average_correctness_score ?? report?.correctness_score ?? 0)}<span className="text-sm text-slate-400">/100</span>
+              </p>
+            </div>
+          </div>
+
+          {content ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+              <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Turn {currentItem?.question.sequence_number} verdict</span>
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${
+                    content.correctness_status === "correct"
+                      ? "border-emerald-400/30 bg-emerald-950/40 text-emerald-300"
+                      : content.correctness_status === "partially_correct"
+                      ? "border-amber-400/30 bg-amber-950/40 text-amber-300"
+                      : "border-rose-400/30 bg-rose-950/40 text-rose-300"
+                  }`}>
+                    {correctnessLabel(content.correctness_status)}
+                  </span>
+                </div>
+                <div className="mt-4 flex items-end gap-3">
+                  <span className={`font-mono text-4xl font-bold ${scoreColor(content.correctness_score)}`}>{Math.round(content.correctness_score)}</span>
+                  <span className="pb-1 text-xs text-slate-500">correctness score</span>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-slate-200">{content.correctness_summary || content.reasoning_summary}</p>
+                {content.feedback?.[0] && (
+                  <div className="mt-4 rounded-xl border border-cyan-400/15 bg-cyan-950/20 p-3 text-xs leading-relaxed">
+                    <p className="font-semibold text-cyan-200">Next improvement</p>
+                    <p className="mt-1 text-slate-300">{content.feedback[0].action}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <span>Knowledge covered</span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {(content.topic_coverage ?? []).map((topic) => (
+                      <div key={topic.topic} className="rounded-xl border border-white/8 bg-black/20 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-white">{topic.topic}</span>
+                          <span className={`font-mono text-xs ${topic.covered ? "text-emerald-300" : "text-amber-300"}`}>{Math.round(topic.score)}%</span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-400">{topic.covered ? "Evidence found in your answer." : topic.explanation || "Add this topic explicitly next time."}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-indigo-400/15 bg-indigo-950/15 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-indigo-200">A stronger answer would</p>
+                  <ol className="mt-2 space-y-2 text-xs leading-relaxed text-slate-300">
+                    {(content.ideal_answer_outline ?? []).map((line, index) => (
+                      <li key={`${line}-${index}`} className="flex gap-2"><span className="font-mono text-indigo-300">{index + 1}.</span><span>{line}</span></li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-5 rounded-xl border border-amber-400/20 bg-amber-950/20 p-4 text-sm text-amber-200">
+              This answer is still processing. Refresh the report in a moment to see the correctness verdict and topic coverage.
+            </p>
+          )}
+        </section>
 
         {/* Dual-Perspective Panel Evaluation */}
         {review.panel_report && (
@@ -476,6 +582,15 @@ export default function InterviewReviewPage() {
                 </div>
               </div>
             </div>
+
+            <TextTimeline
+              transcript={currentItem?.transcript}
+              speechMetrics={currentItem?.speech_metrics}
+              contentMetrics={content}
+              durationSeconds={currentItem?.answer?.duration_seconds ?? 0}
+              currentTime={currentTime}
+              onSeek={seekTo}
+            />
           </div>
 
           {/* Right Column: Grounded Timeline & Filler Breakdown */}
@@ -545,6 +660,55 @@ export default function InterviewReviewPage() {
                     No {activeFilter.toLowerCase()} detected in this turn.
                   </div>
                 )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-cyan-500/15 bg-cyan-950/[0.12] p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <Eye className="h-4 w-4 text-cyan-300" />
+                  Communication signals
+                </div>
+                {currentItem?.vision_metrics?.visual_communication_score != null && (
+                  <span className={`font-mono text-lg font-bold ${scoreColor(currentItem.vision_metrics.visual_communication_score)}`}>
+                    {Math.round(currentItem.vision_metrics.visual_communication_score)}
+                  </span>
+                )}
+              </div>
+              {currentItem?.vision_metrics?.capability_status && currentItem.vision_metrics.capability_status !== "unavailable" ? (
+                <div className="mt-3 space-y-2 text-xs">
+                  <p className="text-slate-400">
+                    {Math.round((currentItem.vision_metrics.face_detected_ratio ?? 0) * 100)}% face visibility · {Math.round((currentItem.vision_metrics.eye_contact_ratio ?? 0) * 100)}% camera-facing opportunity · {Math.round((currentItem.vision_metrics.multiple_people_ratio ?? 0) * 100)}% multi-person frames
+                  </p>
+                  <p className="text-slate-500">
+                    Observable expression cue: <span className="text-slate-300">{currentItem.vision_metrics.expression_signal}</span>{currentItem.vision_metrics.expression_confidence != null ? ` (${Math.round(currentItem.vision_metrics.expression_confidence * 100)}% confidence)` : ""}
+                  </p>
+                  {currentItem.vision_metrics.strengths.slice(0, 2).map((strength) => (
+                    <p key={strength} className="text-emerald-200">+ {strength}</p>
+                  ))}
+                  {currentItem.vision_metrics.improvements.slice(0, 2).map((improvement) => (
+                    <p key={improvement} className="text-amber-200">→ {improvement}</p>
+                  ))}
+                  <p className="pt-1 text-[10px] leading-4 text-slate-500">Eye direction and expression cues are low-confidence communication signals, not identity or emotion diagnoses.</p>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs leading-relaxed text-slate-400">
+                  Visual telemetry was unavailable for this answer. Content and speech scoring still apply; no camera metric is treated as a failure.
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-violet-500/15 bg-violet-950/[0.12] p-5">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Activity className="h-4 w-4 text-violet-300" />
+                Transcription quality
+              </div>
+              <div className="mt-3 flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-2xl font-bold text-violet-200">{Math.round((currentItem?.transcript?.quality_score ?? 0) * 100)}%</p>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">{currentItem?.transcript?.quality_label ?? "Unavailable"}</p>
+                </div>
+                <p className="max-w-[13rem] text-right text-[11px] leading-4 text-slate-400">{currentItem?.transcript?.quality_notes ?? "No transcript quality explanation is available."}</p>
               </div>
             </div>
 

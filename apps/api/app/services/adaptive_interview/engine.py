@@ -14,8 +14,10 @@ Generates grounded follow-up questions tailored to candidate answers:
 from __future__ import annotations
 
 import json
+import inspect
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -115,10 +117,30 @@ class GeminiAdaptiveEngine:
         )
 
         # 4. Evaluate base follow-up decision & ClaimChaser analysis
+        followup_result = await db.execute(
+            select(func.count(Question.id)).where(
+                Question.interview_id == parent_question.interview_id,
+                Question.root_question_id == (
+                    parent_question.root_question_id or parent_question.id
+                ),
+                Question.question_source == "follow_up",
+            )
+        )
+        raw_followup_count = followup_result.scalar_one()
+        if inspect.isawaitable(raw_followup_count):
+            raw_followup_count = await raw_followup_count
+        try:
+            existing_followups_count = int(raw_followup_count)
+        except (TypeError, ValueError):
+            # Lightweight mocked sessions do not always provide scalar values;
+            # the database-backed path remains fully counted.
+            existing_followups_count = 0
+
         decision = self.decision_service.evaluate_decision(
             question=parent_question,
             transcript=candidate_transcript,
             content_metrics=content_metrics,
+            existing_followups_count=existing_followups_count,
         )
 
         # 5. Evaluate pressure engine
@@ -293,9 +315,28 @@ Return JSON with decision, follow_up_type, concise question (5-25 words), reason
         try:
             root_id = parent_question.root_question_id or parent_question.id
             current_depth = parent_question.follow_up_depth or 0
+            # Keep follow-ups immediately after the answered question. The
+            # question list is ordered by sequence_number, so shift later
+            # turns before inserting the new linked turn.
+            later_result = await db.execute(
+                select(Question).where(
+                    Question.interview_id == parent_question.interview_id,
+                    Question.sequence_number > parent_question.sequence_number,
+                )
+            )
+            later_scalars = later_result.scalars()
+            if inspect.isawaitable(later_scalars):
+                later_scalars = await later_scalars
+            later_questions = later_scalars.all()
+            if inspect.isawaitable(later_questions):
+                later_questions = await later_questions
+            for later_question in later_questions if isinstance(later_questions, (list, tuple)) else []:
+                if isinstance(later_question, Question):
+                    later_question.sequence_number += 1
+
             followup_q = Question(
                 interview_id=parent_question.interview_id,
-                sequence_number=parent_question.sequence_number,
+                sequence_number=parent_question.sequence_number + 1,
                 category=parent_question.category,
                 question_type="follow_up",
                 competency=parent_question.competency,

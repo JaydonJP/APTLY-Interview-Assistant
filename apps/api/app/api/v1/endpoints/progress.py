@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
+from app.core.security import AuthenticatedUser
+from app.dependencies import get_optional_current_user
 from app.schemas.progress import ProgressResponse
 from app.services.knowledge_graph import KnowledgeGraphService
 
@@ -19,8 +21,10 @@ router = APIRouter(prefix="/progress", tags=["Progress & Knowledge Graph"])
     description="Returns topic mastery, connected knowledge graph edges, and next difficulty recommendation.",
 )
 async def get_progress(
-    learner_id: str = Query(default="anonymous", min_length=1, max_length=120),
+    learner_id: str | None = Query(default=None, min_length=1, max_length=120),
     db: AsyncSession = Depends(get_db),
+    user: AuthenticatedUser | None = Depends(get_optional_current_user),
 ) -> ProgressResponse:
+    resolved_learner_id = learner_id or (user.id if user else "anonymous")
     service = KnowledgeGraphService()
-    return ProgressResponse(**await service.get_progress(db, learner_id))
+    return ProgressResponse(**await service.get_progress(db, resolved_learner_id))

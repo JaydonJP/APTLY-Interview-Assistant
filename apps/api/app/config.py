@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     )
 
     # ── TTS Provider (ElevenLabs Streaming Voice Engine) ──────
-    tts_provider: Literal["mock", "elevenlabs"] = "mock"
+    tts_provider: Literal["mock", "elevenlabs", "gemini"] = "mock"
     tts_api_key: str = ""
     elevenlabs_api_key: str = Field(default="", description="ElevenLabs API key (server-side only)")
     elevenlabs_model_id: str = Field(default="eleven_flash_v2_5", description="ElevenLabs low-latency voice model")
@@ -167,6 +167,8 @@ class Settings(BaseSettings):
     def normalize_database_url(cls, v: str) -> str:
         """Normalize database URL for asyncpg if raw postgres:// or postgresql:// is provided."""
         if isinstance(v, str):
+            if not v.strip():
+                return "sqlite+aiosqlite:///./aptly.db"
             if v.startswith("postgres://"):
                 return v.replace("postgres://", "postgresql+asyncpg://", 1)
             if v.startswith("postgresql://") and not v.startswith("postgresql+"):

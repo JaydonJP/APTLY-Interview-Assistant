@@ -3,11 +3,42 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface UseMediaCaptureOptions {
+  captureEnabled?: boolean;
   enableVideo?: boolean;
   enableAudio?: boolean;
   enableVAD?: boolean;
   onSpeechStart?: () => void;
   onSpeechEnd?: () => void;
+}
+
+export interface VisionFrameEvent {
+  timestamp_seconds: number;
+  face_count: number;
+  face_x: number;
+  face_y: number;
+  face_width: number;
+  face_height: number;
+  eye_contact: boolean;
+  confidence: number;
+  expressionSignal?: VisionMetrics["expression_signal"];
+  expressionConfidence?: number;
+}
+
+export interface VisionMetrics {
+  provider: string;
+  model_version: string;
+  capability_status: "ready" | "partial" | "unavailable";
+  frame_count: number;
+  valid_frame_count: number;
+  analysis_duration_seconds: number;
+  face_detected_ratio: number | null;
+  multiple_people_ratio: number | null;
+  eye_contact_ratio: number | null;
+  face_centering_score: number | null;
+  tracking_confidence: number | null;
+  expression_signal: "neutral" | "engaged" | "strained" | "unavailable";
+  expression_confidence: number | null;
+  face_presence_events: VisionFrameEvent[];
 }
 
 export interface MediaCaptureState {
@@ -21,13 +52,18 @@ export interface MediaCaptureState {
   recordingDuration: number;
   recordedBlob: Blob | null;
   recordedUrl: string | null;
+  visionMetrics: VisionMetrics;
   sha256Hash: string;
   stream: MediaStream | null;
   mimeType: string;
   liveTranscript: string;
   error: string | null;
   startRecording: () => Promise<void>;
-  stopRecording: () => Promise<{ blob: Blob | null; transcript: string }>;
+  stopRecording: () => Promise<{
+    blob: Blob | null;
+    transcript: string;
+    visionMetrics: VisionMetrics;
+  }>;
   resetRecording: () => void;
 }
 
@@ -60,7 +96,52 @@ interface IWindowWithSpeech extends Window {
   webkitSpeechRecognition?: any;
 }
 
+interface FaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number;
+  eyeContact?: boolean;
+  expressionSignal?: VisionMetrics["expression_signal"];
+  expressionConfidence?: number;
+}
+
+interface BrowserFaceDetector {
+  detect(video: HTMLVideoElement): Promise<Array<{ boundingBox: DOMRectReadOnly }>>;
+}
+
+interface IWindowWithVision extends Window {
+  FaceDetector?: new (options?: {
+    fastMode?: boolean;
+    maxDetectedFaces?: number;
+  }) => BrowserFaceDetector;
+  aptlyVisionProvider?: {
+    modelVersion?: string;
+    detect: (video: HTMLVideoElement) => Promise<{ faces: FaceBox[] }>;
+  };
+  __aptlySetVisionProvider?: (provider: IWindowWithVision["aptlyVisionProvider"] | null) => void;
+}
+
+const EMPTY_VISION_METRICS: VisionMetrics = {
+  provider: "browser",
+  model_version: "unavailable",
+  capability_status: "unavailable",
+  frame_count: 0,
+  valid_frame_count: 0,
+  analysis_duration_seconds: 0,
+  face_detected_ratio: null,
+  multiple_people_ratio: null,
+  eye_contact_ratio: null,
+  face_centering_score: null,
+  tracking_confidence: null,
+  expression_signal: "unavailable",
+  expression_confidence: null,
+  face_presence_events: [],
+};
+
 export function useMediaCapture({
+  captureEnabled = true,
   enableVideo = true,
   enableAudio = true,
   enableVAD = true,
@@ -77,6 +158,7 @@ export function useMediaCapture({
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordedUrl, setRecordedUrl] = useState<string | null>(null);
+  const [visionMetrics, setVisionMetrics] = useState<VisionMetrics>(EMPTY_VISION_METRICS);
   const [sha256Hash, setSha256Hash] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mimeType, setMimeType] = useState<string>("video/webm");
@@ -104,6 +186,233 @@ export function useMediaCapture({
 
   const recognitionRef = useRef<any>(null);
   const transcriptBufferRef = useRef<string>("");
+
+  // Optional browser vision capability. FaceDetector supplies multi-face and
+  // framing signals; an installed landmark adapter can additionally provide
+  // true eye-contact and expression observations through aptlyVisionProvider.
+  const visionVideoRef = useRef<HTMLVideoElement | null>(null);
+  const visionDetectorRef = useRef<BrowserFaceDetector | null>(null);
+  const visionProviderRef = useRef<IWindowWithVision["aptlyVisionProvider"]>(null);
+  const visionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const visionStartedAtRef = useRef<number>(0);
+  const visionSamplesRef = useRef<VisionFrameEvent[]>([]);
+  const visionBusyRef = useRef(false);
+  const visionProviderLoadRef = useRef<Promise<IWindowWithVision["aptlyVisionProvider"] | null> | null>(null);
+
+  const loadOptionalLandmarkProvider = useCallback(async (): Promise<IWindowWithVision["aptlyVisionProvider"] | null> => {
+    if (typeof window === "undefined") return null;
+    const visionWindow = window as IWindowWithVision;
+    if (visionWindow.aptlyVisionProvider) return visionWindow.aptlyVisionProvider;
+    if (visionProviderLoadRef.current) return visionProviderLoadRef.current;
+
+    visionProviderLoadRef.current = new Promise((resolve) => {
+      let settled = false;
+      const finish = (provider: IWindowWithVision["aptlyVisionProvider"] | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        script.remove();
+        resolve(provider);
+      };
+      const script = document.createElement("script");
+      const timeoutId = window.setTimeout(() => finish(null), 9000);
+      visionWindow.__aptlySetVisionProvider = (provider) => {
+        visionWindow.aptlyVisionProvider = provider || undefined;
+        finish(provider);
+      };
+      script.type = "module";
+      script.textContent = `
+        import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs";
+        try {
+          const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");
+          const landmarker = await FaceLandmarker.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+              delegate: "GPU"
+            },
+            runningMode: "VIDEO",
+            numFaces: 4,
+            outputFaceBlendshapes: true
+          });
+          const average = (values) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+          const point = (landmarks, index) => landmarks[index] || { x: 0, y: 0, z: 0 };
+          const makeFace = (landmarks, blendshapeSet) => {
+            const xs = landmarks.map((item) => item.x);
+            const ys = landmarks.map((item) => item.y);
+            const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+            const leftEye = [point(landmarks, 33), point(landmarks, 133)];
+            const rightEye = [point(landmarks, 362), point(landmarks, 263)];
+            const leftIris = point(landmarks, 468), rightIris = point(landmarks, 473);
+            const leftEyeCenter = { x: average(leftEye.map((item) => item.x)), y: average(leftEye.map((item) => item.y)) };
+            const rightEyeCenter = { x: average(rightEye.map((item) => item.x)), y: average(rightEye.map((item) => item.y)) };
+            const eyeOffset = Math.abs(leftIris.x - leftEyeCenter.x) / Math.max(0.01, Math.abs(leftEye[1].x - leftEye[0].x)) + Math.abs(rightIris.x - rightEyeCenter.x) / Math.max(0.01, Math.abs(rightEye[1].x - rightEye[0].x));
+            const nose = point(landmarks, 1);
+            const faceCenter = (minX + maxX) / 2;
+            const facingCamera = eyeOffset < 0.9 && Math.abs(nose.x - faceCenter) < (maxX - minX) * 0.22;
+            const scores = Object.fromEntries((blendshapeSet || []).map((item) => [item.categoryName, item.score]));
+            const smile = ((scores.mouthSmileLeft || 0) + (scores.mouthSmileRight || 0)) / 2;
+            const browTension = ((scores.browDownLeft || 0) + (scores.browDownRight || 0)) / 2;
+            const jawOpen = scores.jawOpen || 0;
+            const expressionSignal = smile > 0.35 ? "engaged" : (browTension > 0.35 && jawOpen > 0.2 ? "strained" : "neutral");
+            const expressionConfidence = Math.min(0.8, Math.max(0.35, Math.max(smile, browTension, jawOpen)));
+            return {
+              x: minX, y: minY, width: maxX - minX, height: maxY - minY,
+              confidence: 0.9, eyeContact: facingCamera,
+              expressionSignal, expressionConfidence
+            };
+          };
+          window.__aptlySetVisionProvider({
+            modelVersion: "MediaPipe Face Landmarker 0.10.22",
+            detect: async (video) => {
+              const result = landmarker.detectForVideo(video, performance.now());
+              return { faces: (result.faceLandmarks || []).map((landmarks, index) => makeFace(landmarks, result.faceBlendshapes?.[index]?.categories || [])) };
+            }
+          });
+        } catch (error) {
+          window.__aptlySetVisionProvider(null);
+        }
+      `;
+      script.onerror = () => finish(null);
+      document.head.appendChild(script);
+    });
+    return visionProviderLoadRef.current;
+  }, []);
+
+  const aggregateVisionMetrics = useCallback((): VisionMetrics => {
+    const samples = visionSamplesRef.current;
+    const validSamples = samples.filter((sample) => sample.face_count > 0);
+    const faceSamples = samples.filter((sample) => sample.face_count > 0);
+    const multiSamples = samples.filter((sample) => sample.face_count > 1);
+    const expressionSamples = samples.filter((sample) => sample.expressionSignal !== "unavailable");
+    const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+    const ratio = (count: number) => (samples.length > 0 ? count / samples.length : null);
+    const average = (values: number[]) => (values.length > 0 ? sum(values) / values.length : null);
+
+    return {
+      provider: visionProviderRef.current ? "browser-face-landmarker" : visionDetectorRef.current ? "browser-face-box" : "browser",
+      model_version:
+        visionProviderRef.current?.modelVersion ||
+        (visionDetectorRef.current ? "FaceDetector API" : "unavailable"),
+      capability_status: visionProviderRef.current
+        ? "ready"
+        : visionDetectorRef.current
+        ? "partial"
+        : "unavailable",
+      frame_count: samples.length,
+      valid_frame_count: validSamples.length,
+      analysis_duration_seconds: visionStartedAtRef.current
+        ? Math.max(0, (Date.now() - visionStartedAtRef.current) / 1000)
+        : 0,
+      face_detected_ratio: ratio(faceSamples.length),
+      multiple_people_ratio: ratio(multiSamples.length),
+      eye_contact_ratio: samples.length > 0 ? sum(samples.map((sample) => (sample.eye_contact ? 1 : 0))) / samples.length : null,
+      face_centering_score: average(validSamples.map((sample) => sample.face_x + sample.face_width / 2).map((center) => Math.max(0, 1 - Math.abs(0.5 - center) * 2))),
+      tracking_confidence: average(validSamples.map((sample) => sample.confidence)),
+      expression_signal: expressionSamples.length > 0
+        ? expressionSamples.sort((a, b) => b.confidence - a.confidence)[0].expressionSignal ?? "unavailable"
+        : "unavailable",
+      expression_confidence: average(expressionSamples.map((sample) => sample.confidence)),
+      face_presence_events: samples.slice(-2000),
+    };
+  }, []);
+
+  const sampleVisionFrame = useCallback(async () => {
+    const video = visionVideoRef.current;
+    if (!video || visionBusyRef.current || video.readyState < 2) return;
+    visionBusyRef.current = true;
+    try {
+      let faces: FaceBox[] = [];
+      if (visionProviderRef.current) {
+        const result = await visionProviderRef.current.detect(video);
+        faces = Array.isArray(result?.faces) ? result.faces : [];
+      } else if (visionDetectorRef.current) {
+        const detections = await visionDetectorRef.current.detect(video);
+        const width = video.videoWidth || 1;
+        const height = video.videoHeight || 1;
+        faces = detections.map((detection) => ({
+          x: detection.boundingBox.x / width,
+          y: detection.boundingBox.y / height,
+          width: detection.boundingBox.width / width,
+          height: detection.boundingBox.height / height,
+          confidence: 0.72,
+        }));
+      }
+
+      const primaryFace = faces
+        .slice()
+        .sort((left, right) => right.width * right.height - left.width * left.height)[0];
+      const faceCenter = primaryFace ? primaryFace.x + primaryFace.width / 2 : 0;
+      const centered = primaryFace ? Math.abs(faceCenter - 0.5) <= 0.18 : false;
+      visionSamplesRef.current.push({
+        timestamp_seconds: visionStartedAtRef.current ? (Date.now() - visionStartedAtRef.current) / 1000 : 0,
+        face_count: Math.min(10, faces.length),
+        face_x: primaryFace?.x ?? 0,
+        face_y: primaryFace?.y ?? 0,
+        face_width: primaryFace?.width ?? 0,
+        face_height: primaryFace?.height ?? 0,
+        // FaceDetector has no iris landmarks, so this is explicitly a
+        // camera-facing opportunity proxy. A landmark adapter can replace it.
+        eye_contact: primaryFace?.eyeContact ?? centered,
+        confidence: Math.max(0, Math.min(1, primaryFace?.confidence ?? 0)),
+        expressionSignal: primaryFace?.expressionSignal ?? "unavailable",
+        expressionConfidence: primaryFace?.expressionConfidence ?? 0,
+      } as VisionFrameEvent & { expressionSignal: VisionMetrics["expression_signal"] });
+    } catch {
+      // A camera frame can be unavailable during tab switches or device sleep.
+    } finally {
+      visionBusyRef.current = false;
+    }
+  }, []);
+
+  const startVisionSampling = useCallback(async (activeStream: MediaStream) => {
+    if (!enableVideo || activeStream.getVideoTracks().length === 0 || typeof document === "undefined") {
+      setVisionMetrics({ ...EMPTY_VISION_METRICS });
+      return;
+    }
+    const visionWindow = window as IWindowWithVision;
+    visionSamplesRef.current = [];
+    visionStartedAtRef.current = Date.now();
+    visionProviderRef.current = await loadOptionalLandmarkProvider();
+    visionDetectorRef.current = null;
+    if (!visionProviderRef.current && visionWindow.FaceDetector) {
+      try {
+        visionDetectorRef.current = new visionWindow.FaceDetector({ fastMode: true, maxDetectedFaces: 4 });
+      } catch {
+        visionDetectorRef.current = null;
+      }
+    }
+
+    if (!visionProviderRef.current && !visionDetectorRef.current) {
+      setVisionMetrics({ ...EMPTY_VISION_METRICS });
+      return;
+    }
+
+    if (!visionVideoRef.current) {
+      visionVideoRef.current = document.createElement("video");
+      visionVideoRef.current.muted = true;
+      visionVideoRef.current.playsInline = true;
+    }
+    visionVideoRef.current.srcObject = activeStream;
+    try {
+      await visionVideoRef.current.play();
+    } catch {
+      // The MediaRecorder stream is still valid even if the hidden analyzer
+      // video cannot autoplay.
+    }
+    if (visionTimerRef.current) clearInterval(visionTimerRef.current);
+    visionTimerRef.current = setInterval(() => void sampleVisionFrame(), 500);
+    void sampleVisionFrame();
+  }, [enableVideo, loadOptionalLandmarkProvider, sampleVisionFrame]);
+
+  const stopVisionSampling = useCallback((): VisionMetrics => {
+    if (visionTimerRef.current) {
+      clearInterval(visionTimerRef.current);
+      visionTimerRef.current = null;
+    }
+    const aggregated = aggregateVisionMetrics();
+    setVisionMetrics(aggregated);
+    return aggregated;
+  }, [aggregateVisionMetrics]);
 
   // Detect supported MIME type dynamically
   const getSupportedMimeType = useCallback(() => {
@@ -216,6 +525,17 @@ export function useMediaCapture({
   useEffect(() => {
     let mounted = true;
 
+    if (!captureEnabled) {
+      setIsCameraReady(false);
+      setIsMicReady(false);
+      setStream(null);
+      setVideoTrackState("NONE");
+      setAudioTrackState("NONE");
+      return () => {
+        mounted = false;
+      };
+    }
+
     async function setupStream() {
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -288,15 +608,26 @@ export function useMediaCapture({
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      if (visionTimerRef.current) {
+        clearInterval(visionTimerRef.current);
+        visionTimerRef.current = null;
+      }
+      if (visionVideoRef.current) {
+        visionVideoRef.current.srcObject = null;
+      }
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
         } catch {}
       }
     };
-  }, [enableVideo, enableAudio]);
+  }, [captureEnabled, enableVideo, enableAudio]);
 
   const startRecording = useCallback(async () => {
+    if (!captureEnabled) {
+      setError("Recording is disabled until media consent is granted.");
+      return;
+    }
     setError(null);
     setRecordedBlob(null);
     setSha256Hash("");
@@ -347,6 +678,7 @@ export function useMediaCapture({
 
       recorder.start(1000); // Timeslice 1000ms
       setIsRecording(true);
+      void startVisionSampling(activeStream);
       startTimeRef.current = Date.now();
       setRecordingDuration(0);
 
@@ -398,9 +730,13 @@ export function useMediaCapture({
         err instanceof Error ? err.message : "Failed to start MediaRecorder recording.",
       );
     }
-  }, [enableAudio, enableVideo, getSupportedMimeType, recordedUrl]);
+  }, [captureEnabled, enableAudio, enableVideo, getSupportedMimeType, recordedUrl, startVisionSampling]);
 
-  const stopRecording = useCallback((): Promise<{ blob: Blob | null; transcript: string }> => {
+  const stopRecording = useCallback((): Promise<{
+    blob: Blob | null;
+    transcript: string;
+    visionMetrics: VisionMetrics;
+  }> => {
     return new Promise((resolve) => {
       // Get finalized transcript from buffer
       const finalTranscript = (transcriptBufferRef.current || liveTranscript || "").trim();
@@ -421,7 +757,7 @@ export function useMediaCapture({
           clearInterval(timerRef.current);
           timerRef.current = null;
         }
-        resolve({ blob: recordedBlob, transcript: finalTranscript });
+        resolve({ blob: recordedBlob, transcript: finalTranscript, visionMetrics: stopVisionSampling() });
         return;
       }
 
@@ -443,12 +779,12 @@ export function useMediaCapture({
         const hash = await computeChecksum(finalBlob);
         setSha256Hash(hash);
 
-        resolve({ blob: finalBlob, transcript: finalTranscript });
+        resolve({ blob: finalBlob, transcript: finalTranscript, visionMetrics: stopVisionSampling() });
       };
 
       recorder.stop();
     });
-  }, [liveTranscript, mimeType, recordedBlob]);
+  }, [liveTranscript, mimeType, recordedBlob, stopVisionSampling]);
 
   const resetRecording = useCallback(() => {
     if (timerRef.current) {
@@ -465,6 +801,7 @@ export function useMediaCapture({
       recognitionRef.current = null;
     }
     chunksRef.current = [];
+    stopVisionSampling();
     isSpeakingRef.current = false;
     silenceStartTimeRef.current = 0;
     speechStartTimeRef.current = 0;
@@ -476,7 +813,7 @@ export function useMediaCapture({
     setSha256Hash("");
     setLiveTranscript("");
     transcriptBufferRef.current = "";
-  }, [recordedUrl]);
+  }, [recordedUrl, stopVisionSampling]);
 
   return {
     isRecording,
@@ -489,6 +826,7 @@ export function useMediaCapture({
     recordingDuration,
     recordedBlob,
     recordedUrl,
+    visionMetrics,
     sha256Hash,
     stream,
     mimeType,

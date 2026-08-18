@@ -28,6 +28,10 @@ class Interview(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # Stable identity for both signed-in users and guest browser sessions.
+    learner_id: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="anonymous", index=True
+    )
 
     # Foreign Keys
     job_id: Mapped[UUID | None] = mapped_column(

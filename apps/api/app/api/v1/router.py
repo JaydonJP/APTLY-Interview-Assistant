@@ -8,7 +8,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import interviews, jobs, live_token, realtime, repair, storage, tts, twin
+from app.api.v1.endpoints import (
+    interviews,
+    jobs,
+    live_token,
+    progress,
+    realtime,
+    repair,
+    storage,
+    tts,
+    twin,
+)
 
 router = APIRouter()
 
@@ -21,3 +31,4 @@ router.include_router(repair.router)
 router.include_router(twin.router)
 router.include_router(realtime.router)
 router.include_router(storage.router)
+router.include_router(progress.router)

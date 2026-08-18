@@ -11,6 +11,7 @@ import asyncio
 import base64
 import io
 import wave
+from collections.abc import AsyncGenerator
 
 from google import genai
 
@@ -102,3 +103,10 @@ class GeminiTTSProvider(TTSProvider):
         except Exception as exc:
             logger.warning("gemini_tts_failed", error=str(exc))
             raise ProviderError("Gemini narration generation failed.") from exc
+
+    async def stream(self, request: TTSSynthesisRequest) -> AsyncGenerator[bytes, None]:
+        """Stream a synthesized WAV in bounded chunks through the shared TTS contract."""
+        result = await self.synthesize(request)
+        chunk_size = 16 * 1024
+        for start in range(0, len(result.audio_bytes), chunk_size):
+            yield result.audio_bytes[start : start + chunk_size]

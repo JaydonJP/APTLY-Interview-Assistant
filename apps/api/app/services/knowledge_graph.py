@@ -42,6 +42,21 @@ class KnowledgeGraphService:
         question: Question,
         content_metrics: Any,
     ) -> None:
+        # Upload retries can re-run the whole analysis pipeline. Do not turn
+        # one answer into multiple attempts for the same learner/topic.
+        already_recorded = (
+            await db.execute(
+                select(LearnerTopicProgress.id)
+                .where(
+                    LearnerTopicProgress.learner_id == learner_id,
+                    LearnerTopicProgress.last_answer_id == answer_id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if already_recorded:
+            return
+
         coverage = content_metrics.topic_coverage_json or []
         coverage_by_topic = {
             normalize_topic(str(item.get("topic", ""))): item

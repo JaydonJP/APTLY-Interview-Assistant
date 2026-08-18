@@ -11,6 +11,7 @@ from app.models.memory import SessionMemory
 from app.models.metrics import SpeechMetrics
 from app.models.question import Question
 from app.models.transcript import Transcript
+from app.models.vision_metrics import VisionMetrics
 
 __all__ = [
     "Answer",
@@ -23,4 +24,5 @@ __all__ = [
     "SessionMemory",
     "SpeechMetrics",
     "Transcript",
+    "VisionMetrics",
 ]

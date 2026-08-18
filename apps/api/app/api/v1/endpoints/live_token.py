@@ -54,6 +54,20 @@ async def mint_gemini_live_token(
     """
     settings = get_settings()
 
+    # The disabled path is intentionally independent of storage. This keeps a
+    # fresh local install safe and responsive before a database is configured.
+    if not settings.feature_gemini_live_interview:
+        return GeminiLiveTokenResponse(
+            enabled=False,
+            ephemeral_token=None,
+            expires_at=None,
+            model=settings.gemini_live_model,
+            language_code=settings.gemini_live_language_code,
+            voice_name="Puck",
+            websocket_url=None,
+            fallback_reason="FEATURE_DISABLED: FEATURE_GEMINI_LIVE_INTERVIEW is set to false.",
+        )
+
     # Validate session
     interview = await service.get_interview_detail(interview_id)
     if not interview:
@@ -67,19 +81,6 @@ async def mint_gemini_live_token(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "ACCESS_DENIED", "message": "Unauthorized access to private session."},
-        )
-
-    # Check feature flag & backend key
-    if not settings.feature_gemini_live_interview:
-        return GeminiLiveTokenResponse(
-            enabled=False,
-            ephemeral_token=None,
-            expires_at=None,
-            model=settings.gemini_live_model,
-            language_code=settings.gemini_live_language_code,
-            voice_name="Puck",
-            websocket_url=None,
-            fallback_reason="FEATURE_DISABLED: FEATURE_GEMINI_LIVE_INTERVIEW is set to false.",
         )
 
     if not settings.gemini_api_key or settings.llm_provider != "gemini":

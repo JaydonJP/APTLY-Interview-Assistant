@@ -27,6 +27,7 @@ import {
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/components/auth/AuthContext";
 import type { InterviewDetail } from "@/types/interview";
+import type { LearnerProgress } from "@/types/progress";
 import type { InterviewTwinProfile, SessionTrendPoint } from "@/types/twin";
 
 type ChartMetric = "overall" | "content" | "delivery" | "evidence";
@@ -35,6 +36,7 @@ export function ProgressDashboard() {
   const { user, openAuthModal } = useAuth();
   const [interviews, setInterviews] = useState<InterviewDetail[]>([]);
   const [twin, setTwin] = useState<InterviewTwinProfile | null>(null);
+  const [learnerProgress, setLearnerProgress] = useState<LearnerProgress | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeMetric, setActiveMetric] = useState<ChartMetric>("overall");
   const [selectedSessionIndex, setSelectedSessionIndex] = useState<number | null>(null);
@@ -55,6 +57,7 @@ export function ProgressDashboard() {
           apiClient.get<InterviewDetail[]>("/api/v1/interviews"),
           apiClient.get<InterviewTwinProfile>("/api/v1/twin"),
         ]);
+        const graphRes = await apiClient.get<LearnerProgress>("/api/v1/progress").catch(() => null);
 
         if (interviewsRes.status === "fulfilled" && Array.isArray(interviewsRes.value)) {
           setInterviews(interviewsRes.value);
@@ -62,6 +65,7 @@ export function ProgressDashboard() {
         if (twinRes.status === "fulfilled" && twinRes.value) {
           setTwin(twinRes.value);
         }
+        if (graphRes) setLearnerProgress(graphRes);
       } catch (err) {
         console.error("Failed to load progress metrics:", err);
       } finally {
@@ -468,6 +472,62 @@ export function ProgressDashboard() {
               </p>
             </div>
           </div>
+
+          {/* ── KNOWLEDGE GRAPH & ADAPTIVE DIFFICULTY ─────────────────── */}
+          <section className="rounded-3xl border border-cyan-500/20 bg-gradient-to-br from-[#101b22] to-[#111522] p-6 sm:p-7 shadow-xl">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Cpu className="h-5 w-5 text-cyan-300" />
+                  <h2 className="text-lg font-bold text-white">Your expanding knowledge graph</h2>
+                </div>
+                <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-400">
+                  Every evaluated answer adds the topics it covered, links co-occurring concepts, and updates mastery for the next interview.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-indigo-400/25 bg-indigo-950/30 px-4 py-3 text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">Next recommended level</p>
+                <p className="mt-1 text-lg font-bold capitalize text-white">{learnerProgress?.recommended_difficulty ?? "medium"}</p>
+              </div>
+            </div>
+
+            {learnerProgress?.topics?.length ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="flex flex-wrap content-start gap-2">
+                  {learnerProgress.topics.slice(0, 16).map((topic) => {
+                    const intensity = Math.max(12, Math.min(100, topic.mastery_score));
+                    return (
+                      <div
+                        key={topic.id}
+                        title={`${topic.attempts} attempts · ${Math.round(topic.mastery_score)}% mastery`}
+                        className="rounded-xl border px-3 py-2 transition"
+                        style={{
+                          borderColor: `rgba(34, 211, 238, ${0.18 + intensity / 500})`,
+                          backgroundColor: `rgba(8, 145, 178, ${0.06 + intensity / 700})`,
+                        }}
+                      >
+                        <p className="text-xs font-semibold text-cyan-100">{topic.name}</p>
+                        <p className="mt-0.5 font-mono text-[10px] text-cyan-300/80">{Math.round(topic.mastery_score)}% mastery · {topic.attempts} reps</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Strongest connections</p>
+                  <div className="mt-3 space-y-2">
+                    {learnerProgress.edges.slice(0, 5).map((edge) => {
+                      const source = learnerProgress.topics.find((topic) => topic.id === edge.source_topic_id)?.name ?? "Topic";
+                      const target = learnerProgress.topics.find((topic) => topic.id === edge.target_topic_id)?.name ?? "Topic";
+                      return <p key={edge.id} className="text-[11px] text-slate-300"><span className="text-cyan-300">{source}</span><span className="px-1.5 text-slate-600">↔</span><span className="text-indigo-300">{target}</span><span className="ml-2 font-mono text-slate-500">×{edge.weight}</span></p>;
+                    })}
+                    {!learnerProgress.edges.length && <p className="text-xs text-slate-500">Answer a question covering two topics to create the first link.</p>}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-5 rounded-xl border border-dashed border-white/10 p-4 text-xs text-slate-500">Your first evaluated answer will seed the graph.</p>
+            )}
+          </section>
 
           {/* ── ONLY ONE INTERACTIVE AREA CURVE GRAPH ──────────────────── */}
           <div className="rounded-3xl border border-white/10 bg-[#131923]/90 p-6 sm:p-8 backdrop-blur-xl shadow-xl">

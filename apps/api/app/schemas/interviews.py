@@ -94,6 +94,36 @@ class TranscriptResponse(VersionedSchema):
     words: list[dict[str, Any]] = Field(default_factory=list)
     model_provider: str = "mock"
     model_version: str = "mock-v1.0"
+    quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    provider_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    source_agreement_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    quality_label: str = "low"
+    quality_notes: str = ""
+    created_at: datetime
+
+
+class VisionMetricsResponse(VersionedSchema):
+    """Coarse, privacy-safe camera communication signals for an answer."""
+
+    id: UUID
+    answer_id: UUID
+    provider: str = "browser"
+    model_version: str = "unavailable"
+    capability_status: str = "unavailable"
+    frame_count: int = Field(default=0, ge=0)
+    valid_frame_count: int = Field(default=0, ge=0)
+    analysis_duration_seconds: float = Field(default=0.0, ge=0.0)
+    face_detected_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    multiple_people_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    eye_contact_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    face_centering_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    tracking_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    visual_communication_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    expression_signal: str = "unavailable"
+    expression_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    face_presence_events: list[dict[str, Any]] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -112,6 +142,11 @@ class ContentMetricsResponse(VersionedSchema):
     structure_score: float
     evidence_score: float
     overall_content_score: float
+    correctness_status: str = "not_enough_evidence"
+    correctness_score: float = 0.0
+    correctness_summary: str = ""
+    topic_coverage: list[dict[str, Any]] = Field(default_factory=list)
+    ideal_answer_outline: list[str] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     star_analysis: StarAnalysis | None = None
@@ -135,6 +170,22 @@ class AnswerCreateRequest(AptlyBaseModel):
     question_id: UUID
 
 
+class QuestionExplanationRequest(AptlyBaseModel):
+    """A candidate's request for a plain-language clarification during a turn."""
+
+    doubt: str = Field(..., min_length=2, max_length=1000)
+
+
+class QuestionExplanationResponse(AptlyBaseModel):
+    """Interviewer explanation grounded in the current question and role."""
+
+    question_id: UUID
+    doubt: str
+    answer: str
+    provider: str = "mock"
+    model: str = "unknown"
+
+
 class AnswerResponse(AptlyBaseModel):
     """Candidate answer entity."""
 
@@ -147,10 +198,15 @@ class AnswerResponse(AptlyBaseModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     audio_storage_key: str | None = None
+    video_storage_key: str | None = None
     audio_size_bytes: int | None = None
+    video_size_bytes: int | None = None
+    media_content_type: str | None = None
+    media_has_video: bool = False
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
     content_metrics: ContentMetricsResponse | None = None
+    vision_metrics: VisionMetricsResponse | None = None
     created_at: datetime
 
 
@@ -219,6 +275,7 @@ class QuestionReviewItem(AptlyBaseModel):
     transcript: TranscriptResponse | None = None
     speech_metrics: SpeechMetricsResponse | None = None
     content_metrics: ContentMetricsResponse | None = None
+    vision_metrics: VisionMetricsResponse | None = None
     technical_dna: TechnicalAnswerDNA | None = None
     behavioral_dna: BehavioralAnswerDNA | None = None
 
@@ -259,7 +316,13 @@ class InterviewReportCard(AptlyBaseModel):
 
     overall_score: float = Field(ge=0.0, le=100.0)
     content_score: float = Field(ge=0.0, le=100.0)
+    correctness_score: float = Field(default=0.0, ge=0.0, le=100.0)
+    correctness_label: str = "Not enough evidence"
     delivery_score: float = Field(ge=0.0, le=100.0)
+    visual_communication_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    multimodal_score: float | None = Field(default=None, ge=0.0, le=100.0)
+    visual_strengths: list[str] = Field(default_factory=list)
+    visual_improvements: list[str] = Field(default_factory=list)
     confidence_label: str
     strengths: list[str] = Field(default_factory=list)
     top_habits: list[ReportHabit] = Field(default_factory=list)
@@ -284,6 +347,8 @@ class InterviewReviewResponse(VersionedSchema):
     average_content_score: float = 0.0
     average_relevance_score: float = 0.0
     average_technical_depth_score: float = 0.0
+    average_correctness_score: float = 0.0
+    average_visual_communication_score: float | None = Field(default=None, ge=0.0, le=100.0)
     questions_review: list[QuestionReviewItem] = Field(default_factory=list)
     report_card: InterviewReportCard | None = None
     panel_report: PanelInterviewReport | None = None
